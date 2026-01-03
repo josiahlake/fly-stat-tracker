@@ -160,6 +160,7 @@ export default function GameTracker() {
   const [selectedPlayer, setSelectedPlayer] = useState<string>("");
   const [lastTapId, setLastTapId] = useState<string | null>(null);
   const [history, setHistory] = useState<Action[]>([]);
+  const [vibOn, setVibOn] = useState<boolean>(true);
 
   const mountedRef = useRef(false);
 
@@ -280,15 +281,16 @@ export default function GameTracker() {
   // --- Tap feedback ---
   const tapFeedback = (id: string) => {
     setLastTapId(id);
-
-    if (tapTimeoutRef.current) window.clearTimeout(tapTimeoutRef.current);
-    tapTimeoutRef.current = window.setTimeout(() => setLastTapId(null), 120);
-
-    if (vibrationOn && typeof navigator !== "undefined" && "vibrate" in navigator) {
+    window.setTimeout(() => setLastTapId(null), 120);
+  
+    if (!vibOn) return;
+  
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      // Most Android browsers support; iOS Safari often ignores vibration.
       // @ts-ignore
       navigator.vibrate(12);
     }
-  };
+  };  
 
   // --- Actions ---
   const inc = (key: keyof LiveCounts, tapId: string) => {
@@ -367,15 +369,13 @@ export default function GameTracker() {
         </div>
 
         <div className="topActions">
-          <button
-            className="ghostBtn"
-            type="button"
-            onClick={() => setVibrationOn((v) => !v)}
-            aria-pressed={vibrationOn}
-            title="Toggle vibration feedback"
-          >
-            Vib: {vibrationOn ? "On" : "Off"}
-          </button>
+        <button
+  className="ghostBtn"
+  onClick={() => setVibOn((v) => !v)}
+  type="button"
+>
+  Vib: {vibOn ? "On" : "Off"}
+</button>
 
           <button className="ghostBtn" onClick={undo} type="button" disabled={!history.length}>
             Undo
