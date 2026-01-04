@@ -8,7 +8,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
  * - Save game (stored locally)
  * - Player Log: season-to-date averages + per-game list (filter by player)
  * - Two horizontal tile rows (7 across on desktop; responsive on phone)
- * - Tap feedback: quick flash + optional vibration
+ * - Tap feedback: quick flash (no vibration toggle UI)
+ * - Undo + Reset safety confirmations
+ * - Share: choose "Share Current Game" or "Share Overall Season" (lean season summary)
  */
 
 type LiveCounts = {
@@ -160,15 +162,19 @@ export default function GameTracker() {
   const [selectedPlayer, setSelectedPlayer] = useState<string>("");
   const [lastTapId, setLastTapId] = useState<string | null>(null);
   const [history, setHistory] = useState<Action[]>([]);
-  const [vibOn, setVibOn] = useState<boolean>(true);
 
   const mountedRef = useRef(false);
 
-  // Step 1 support: stable tap flash timeout
+  // Stable tap flash timeout
   const tapTimeoutRef = useRef<number | null>(null);
 
-  // Optional vibration toggle (default ON)
-  const [vibrationOn, setVibrationOn] = useState<boolean>(true);
+  // Share UI + status
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareStatus, setShareStatus] = useState<"" | "copied" | "shared" | "error">("");
+  const shareTimeoutRef = useRef<number | null>(null);
+
+  // Keep last saved entry (so Share Current Game can fall back if live is empty)
+  const [lastSavedEntry, setLastSavedEntry] = useState<GameEntry | null>(null);
 
   // Load games once
   useEffect(() => {
@@ -243,7 +249,10 @@ export default function GameTracker() {
 
   // Season-to-date aggregates (selected player)
   const season = useMemo(() => {
-    const total = gamesForSelected.reduce((acc, g) => sumCounts(acc, g.counts), { ...emptyCounts });
+    const total = gamesForSelected.reduce(
+      (acc, g) => sumCounts(acc, g.counts),
+      { ...emptyCounts }
+    );
     const n = gamesForSelected.length;
 
     const fgm = total.made2 + total.made3;
@@ -278,19 +287,23 @@ export default function GameTracker() {
     };
   }, [gamesForSelected]);
 
+  const hasAnyLiveCounts = (c: LiveCounts) =>
+    (Object.keys(emptyCounts) as (keyof LiveCounts)[]).some((k) => c[k] > 0);
+
   // --- Tap feedback ---
   const tapFeedback = (id: string) => {
     setLastTapId(id);
-    window.setTimeout(() => setLastTapId(null), 120);
-  
-    if (!vibOn) return;
-  
+    if (tapTimeoutRef.current) window.clearTimeout(tapTimeoutRef.current);
+    tapTimeoutRef.current = window.setTimeout(() => setLastTapId(null), 120);
+
+    // Optional subtle vibration (always-on if device supports; no UI toggle)
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-      // Most Android browsers support; iOS Safari often ignores vibration.
-      // @ts-ignore
-      navigator.vibrate(12);
+      try {
+        // @ts-ignore
+        navigator.vibrate(12);
+      } catch {}
     }
-  };  
+  };
 
   // --- Actions ---
   const inc = (key: keyof LiveCounts, tapId: string) => {
@@ -330,17 +343,15 @@ export default function GameTracker() {
     setCounts({ ...emptyCounts });
     setHistory((h) => [...h, { kind: "reset" }]);
   };
-  const describeAction = (a: any) => {
-    // best effort label (won’t crash even if shape changes)
-    if (!a) return "last action";
-    if (a.kind === "inc") return `+${String(a.key || "").toUpperCase()}`;
-    if (a.kind === "dec") return `-${String(a.key || "").toUpperCase()}`;
-    return "RESET";
+
+  const describeAction = (a: Action) => {
+    if (a.kind === "reset") return "Reset";
+    const pretty = String(a.key).toUpperCase();
+    return a.kind === "inc" ? `+${pretty}` : `-${pretty}`;
   };
 
   const confirmUndo = () => {
     if (!history.length) return;
-
     const last = history[history.length - 1];
     const ok = window.confirm(
       `Undo last action: ${describeAction(last)}?\n\nThis will revert your most recent tap.`
@@ -349,9 +360,8 @@ export default function GameTracker() {
   };
 
   const confirmReset = () => {
-    // Only bother confirming if there’s something to lose
     const hasStats =
-      Object.values(counts).some((v) => Number(v) > 0) || history.length > 0;
+      (Object.values(counts) as number[]).some((v) => Number(v) > 0) || history.length > 0;
 
     if (!hasStats) return;
 
@@ -382,12 +392,139 @@ export default function GameTracker() {
 
     setGames((g) => [entry, ...g]);
     setSelectedPlayer(p);
+    setLastSavedEntry(entry);
 
     resetLive();
   };
 
   const deleteGame = (id: string) => {
     setGames((g) => g.filter((x) => x.id !== id));
+    setLastSavedEntry((prev) => (prev?.id === id ? null : prev));
+  };
+
+  // ---------- SHARE (text) ----------
+  const buildShareTextCurrentGame = (entry: GameEntry) => {
+    const c = entry.counts;
+
+    const fgm = c.made2 + c.made3;
+    const fga = c.made2 + c.miss2 + c.made3 + c.miss3;
+    const tpm = c.made3;
+    const tpa = c.made3 + c.miss3;
+    const ftm = c.madeFT;
+    const fta = c.madeFT + c.missFT;
+    const pts = c.made2 * 2 + c.made3 * 3 + c.madeFT;
+
+    const ttl = c.orb + c.drb;
+
+    const lines: string[] = [];
+    lines.push(`Fly Stat Tracker — Current Game`);
+    lines.push(`${entry.playerName}${entry.date ? ` • ${entry.date}` : ""}`);
+
+    const metaParts: string[] = [];
+    if (entry.opponent?.trim()) metaParts.push(`vs ${entry.opponent.trim()}`);
+    if (entry.team?.trim()) metaParts.push(entry.team.trim());
+    if (metaParts.length) lines.push(metaParts.join(" • "));
+
+    lines.push(``);
+    lines.push(`PTS ${pts}`);
+    lines.push(`FG ${fgm}-${fga} (${formatPct(pct(fgm, fga))})`);
+    lines.push(`3P ${tpm}-${tpa} (${formatPct(pct(tpm, tpa))})`);
+    lines.push(`FT ${ftm}-${fta} (${formatPct(pct(ftm, fta))})`);
+    lines.push(``);
+    lines.push(
+      `REB ${ttl} (O ${c.orb} / D ${c.drb})  AST ${c.ast}  TO ${c.to}  STL ${c.stl}  PF ${c.pf}`
+    );
+
+    if (entry.notes?.trim()) {
+      lines.push(``);
+      lines.push(`Notes: ${entry.notes.trim()}`);
+    }
+
+    return lines.join("\n");
+  };
+
+  const buildShareTextSeasonLean = (player: string) => {
+    const p = player.trim();
+    const n = gamesForSelected.length;
+
+    if (!p) return `Fly Stat Tracker — Season Summary\n\nNo player selected.`;
+    if (!n) return `Fly Stat Tracker — Season Summary\n\n${p}: No saved games yet.`;
+
+    const lines: string[] = [];
+    lines.push(`Fly Stat Tracker — Season Summary`);
+    lines.push(`${p} • ${n} games`);
+    lines.push(``);
+    lines.push(`Averages per game:`);
+    lines.push(
+      `PPG ${season.ppg.toFixed(1)}  RPG ${season.rpg.toFixed(1)}  APG ${season.apg.toFixed(1)}`
+    );
+    lines.push(
+      `FG% ${formatPct(season.fgPct)}  3P% ${formatPct(season.tpPct)}  FT% ${formatPct(season.ftPct)}`
+    );
+    lines.push(
+      `ORB/G ${season.orbg.toFixed(1)}  DRB/G ${season.drbg.toFixed(1)}  STL/G ${season.stlg.toFixed(
+        1
+      )}  TO/G ${season.topg.toFixed(1)}`
+    );
+
+    return lines.join("\n");
+  };
+
+  const doShareText = async (text: string) => {
+    try {
+      setShareStatus("");
+      if (shareTimeoutRef.current) window.clearTimeout(shareTimeoutRef.current);
+
+      const navAny = navigator as any;
+
+      if (navAny?.share) {
+        await navAny.share({ title: "Fly Stat Tracker", text });
+        setShareStatus("shared");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setShareStatus("copied");
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        setShareStatus("copied");
+      }
+
+      shareTimeoutRef.current = window.setTimeout(() => setShareStatus(""), 1600);
+    } catch {
+      setShareStatus("error");
+      shareTimeoutRef.current = window.setTimeout(() => setShareStatus(""), 1600);
+    }
+  };
+
+  const shareCurrentGame = async () => {
+    const pName = playerName.trim() || selectedPlayer.trim() || lastSavedEntry?.playerName || "Player";
+
+    const draft: GameEntry = {
+      id: "draft",
+      createdAt: Date.now(),
+      date: date || todayISO(),
+      team: team.trim() || "Fly Academy",
+      opponent: opponent.trim(),
+      playerName: pName,
+      notes: notes.trim() || undefined,
+      counts: { ...counts },
+    };
+
+    // Prefer live if any counts; otherwise fall back to last saved
+    const entryToShare = hasAnyLiveCounts(counts) ? draft : lastSavedEntry ?? draft;
+
+    await doShareText(buildShareTextCurrentGame(entryToShare));
+  };
+
+  const shareSeason = async () => {
+    const p = selectedPlayer.trim() || playerName.trim();
+    await doShareText(buildShareTextSeasonLean(p));
   };
 
   return (
@@ -400,22 +537,65 @@ export default function GameTracker() {
         </div>
 
         <div className="topActions">
-        <button
-  className="ghostBtn"
-  onClick={() => setVibOn((v) => !v)}
-  type="button"
->
-  Vib: {vibOn ? "On" : "Off"}
-</button>
-
           <button className="ghostBtn" onClick={confirmUndo} type="button" disabled={!history.length}>
             Undo
           </button>
+
           <button className="ghostBtn" onClick={confirmReset} type="button">
             Reset
           </button>
+
+          <button className="ghostBtn" onClick={() => setShareOpen(true)} type="button">
+            Share
+            {shareStatus ? (
+              <span className="pill" aria-live="polite">
+                {shareStatus === "copied" ? "Copied" : shareStatus === "shared" ? "Shared" : "Error"}
+              </span>
+            ) : null}
+          </button>
         </div>
       </div>
+
+      {shareOpen ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true" aria-label="Share options">
+          <div className="modal">
+            <div className="modalTitle">Share</div>
+            <div className="modalHint">Choose what you want to share</div>
+
+            <div className="modalButtons">
+              <button
+                className="modalBtn"
+                type="button"
+                onClick={async () => {
+                  setShareOpen(false);
+                  await shareCurrentGame();
+                }}
+              >
+                Share Current Game
+              </button>
+
+              <button
+                className="modalBtn"
+                type="button"
+                onClick={async () => {
+                  setShareOpen(false);
+                  await shareSeason();
+                }}
+                disabled={!selectedPlayer.trim() && !playerName.trim()}
+                title={!selectedPlayer.trim() && !playerName.trim() ? "Select or enter a player first" : ""}
+              >
+                Share Overall Season
+              </button>
+
+              <button className="modalBtnSecondary" type="button" onClick={() => setShareOpen(false)}>
+                Cancel
+              </button>
+            </div>
+
+            <div className="modalMicro">Tip: “Season” uses saved games for the selected player.</div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid">
         {/* LEFT: Live game tracker */}
@@ -426,7 +606,7 @@ export default function GameTracker() {
               <div className="cardHint">Big buttons • fast taps • phone-friendly</div>
             </div>
             <button className="primaryBtn" onClick={saveGame} type="button">
-              Save
+              Save Game
             </button>
           </div>
 
@@ -519,10 +699,13 @@ export default function GameTracker() {
               rows={3}
             />
           </div>
+          <div className="saveRow">
+  <button className="primaryBtn" onClick={saveGame} type="button">
+    Save Game
+  </button>
+</div>
 
-          <div className="microHint">
-            Tip: Big buttons flash on tap. Vibration can be toggled (top right).
-          </div>
+          <div className="microHint">Tip: Big buttons flash on tap. Use Save to lock in games for season stats.</div>
         </div>
 
         {/* RIGHT: Player log */}
@@ -713,6 +896,7 @@ export default function GameTracker() {
           gap:10px;
           flex-wrap: wrap;
           justify-content:flex-end;
+          align-items: center;
         }
 
         .ghostBtn{
@@ -722,10 +906,22 @@ export default function GameTracker() {
           padding: 10px 14px;
           font-weight: 600;
           cursor: pointer;
+          position: relative;
         }
         .ghostBtn:disabled{
           opacity:.45;
           cursor:not-allowed;
+        }
+
+        .pill{
+          display:inline-block;
+          margin-left: 8px;
+          border: 1px solid var(--line);
+          background: rgba(255,255,255,.9);
+          padding: 3px 8px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 800;
         }
 
         .grid{
@@ -884,12 +1080,8 @@ export default function GameTracker() {
           margin-top: 10px;
         }
 
-        /* =========================================================
-           STEP 1: MOBILE TAP OPTIMIZATIONS (no layout changes)
-           - Prevent iOS double-tap zoom + reduce accidental selection
-           - Remove tap highlight on mobile
-           ========================================================= */
-        .tapBtn, .ghostBtn, .primaryBtn, .miniBtn{
+        /* Mobile tap optimizations */
+        .tapBtn, .ghostBtn, .primaryBtn, .miniBtn, .modalBtn, .modalBtnSecondary{
           touch-action: manipulation;
         }
 
@@ -898,6 +1090,12 @@ export default function GameTracker() {
           -webkit-user-select: none;
           -webkit-tap-highlight-color: transparent;
         }
+
+        .saveRow{
+  margin-top: 12px;
+  display:flex;
+  justify-content:flex-end;
+}
 
         .tapBtn{
           border: 0;
@@ -1045,6 +1243,79 @@ export default function GameTracker() {
           color: rgba(0,0,0,.65);
           border-top: 1px solid var(--line);
           padding-top: 10px;
+        }
+
+        /* Share modal */
+        .modalOverlay{
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,.25);
+          display:flex;
+          align-items: center;
+          justify-content: center;
+          padding: 16px;
+          z-index: 50;
+        }
+
+        .modal{
+          width: 100%;
+          max-width: 420px;
+          background: #fff;
+          border: 1px solid var(--line);
+          border-radius: 18px;
+          box-shadow: 0 20px 50px rgba(0,0,0,.18);
+          padding: 16px;
+        }
+
+        .modalTitle{
+          font-weight: 900;
+          font-size: 16px;
+        }
+
+        .modalHint{
+          margin-top: 4px;
+          color: var(--muted);
+          font-size: 12px;
+        }
+
+        .modalButtons{
+          margin-top: 14px;
+          display:flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .modalBtn{
+          width: 100%;
+          border: 0;
+          border-radius: 14px;
+          padding: 12px 14px;
+          background: var(--ink);
+          color: #fff;
+          font-weight: 800;
+          cursor: pointer;
+        }
+
+        .modalBtn:disabled{
+          opacity: .5;
+          cursor: not-allowed;
+        }
+
+        .modalBtnSecondary{
+          width: 100%;
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          padding: 12px 14px;
+          background: #fff;
+          color: var(--ink);
+          font-weight: 800;
+          cursor: pointer;
+        }
+
+        .modalMicro{
+          margin-top: 12px;
+          font-size: 12px;
+          color: rgba(0,0,0,.55);
         }
       `}</style>
     </div>
