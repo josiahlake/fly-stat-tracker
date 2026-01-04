@@ -532,8 +532,8 @@ export default function GameTracker() {
       <div className="topBar">
         <div>
           <div className="kicker">PREPARE FOR TAKEOFF</div>
-          <h1 className="title">Fly Stat Tracker</h1>
-          <div className="subtitle">Tap to track live. Save when the game ends. One player at a time.</div>
+          <h1 className="title">FLY STAT TRACKER</h1>
+          <div className="subtitle">Track your Player's stats for a game or for a season.</div>
         </div>
 
         <div className="topActions">
@@ -603,7 +603,6 @@ export default function GameTracker() {
           <div className="cardHeader">
             <div>
               <div className="cardTitle">Live Game Tracker</div>
-              <div className="cardHint">Big buttons • fast taps • phone-friendly</div>
             </div>
             <button className="primaryBtn" onClick={saveGame} type="button">
               Save Game
@@ -629,7 +628,7 @@ export default function GameTracker() {
                 className="input"
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
-                placeholder="e.g., Jordan"
+                placeholder="ex: Jordan Smith"
               />
             </div>
 
@@ -639,7 +638,7 @@ export default function GameTracker() {
                 className="input"
                 value={opponent}
                 onChange={(e) => setOpponent(e.target.value)}
-                placeholder="e.g., Tigard"
+                placeholder="ex: Team Alpha 14U"
               />
             </div>
           </div>
@@ -705,7 +704,7 @@ export default function GameTracker() {
   </button>
 </div>
 
-          <div className="microHint">Tip: Big buttons flash on tap. Use Save to lock in games for season stats.</div>
+          <div className="microHint">Tip: Use Save to lock in games for season stats.</div>
         </div>
 
         {/* RIGHT: Player log */}
@@ -771,7 +770,7 @@ export default function GameTracker() {
           </div>
 
           <div className="microHint" style={{ marginTop: 10 }}>
-            Tip: Save each game. This panel updates averages automatically.
+            Tip: Save each game to update averages automatically.
           </div>
 
           <div className="sectionHeader" style={{ marginTop: 16 }}>
@@ -833,7 +832,7 @@ export default function GameTracker() {
           )}
 
           <div className="microHint" style={{ marginTop: 12 }}>
-            Saved games are stored locally on this device for now. Next upgrade: export/share + cloud sync across devices.
+            Saved games are stored locally on this device.
           </div>
         </div>
       </div>
