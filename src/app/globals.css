@@ -458,3 +458,35 @@ a {
 select {
   appearance: auto;
 }
+/* Prevent long values (like 100.0%) from spilling outside stat chips */
+.chipValue {
+  min-width: 0;
+}
+
+.chipValueText {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Only when needed: shrink long values so "100.0%" fits */
+.chipValueText--tight {
+  font-size: 14px; /* small enough to fit, minimal visual change */
+  letter-spacing: -0.01em;
+}
+/* Default: allow ellipsis for safety */
+.chipValueText {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipValueText--fit {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}

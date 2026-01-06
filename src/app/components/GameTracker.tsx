@@ -2,33 +2,14 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-/**
- * Fly Stat Tracker (Single Player)
- * - Tap big buttons during game (made/miss 2PT, 3PT, FT + ORB/DRB/AST/TO/STL/FOUL)
- * - Save game (stored locally)
- * - Player Log: season-to-date averages + per-game list (filter by player)
- * - Two horizontal tile rows (7 across on desktop; responsive on phone)
- * - Tap feedback: quick flash (no vibration toggle UI)
- * - Undo + Reset safety confirmations
- * - Share: choose "Share Current Game" or "Share Overall Season" (lean season summary)
- *
- * PAYWALL:
- * - First 2 game saves are free
- * - On 3rd attempted save -> show paywall modal and block save
- * - Purchases:
- *   - single_game adds +1 save credit
- *   - season unlocks unlimited season saving
- *   - unlimited_monthly / unlimited_annual unlock unlimited saving
- */
-
-type LiveCounts = {
+/** ---------------- Types ---------------- */
+type Counts = {
   made2: number;
   miss2: number;
   made3: number;
   miss3: number;
-  madeFT: number;
-  missFT: number;
-
+  ftm: number;
+  fta: number;
   orb: number;
   drb: number;
   ast: number;
@@ -41,470 +22,466 @@ type GameEntry = {
   id: string;
   createdAt: number;
   date: string; // YYYY-MM-DD
+  teamLogId: string; // NEW
   team: string;
   opponent: string;
   playerName: string;
   notes?: string;
-
-  counts: LiveCounts;
+  counts: Counts;
 };
 
-type Action =
-  | { kind: "inc"; key: keyof LiveCounts }
-  | { kind: "dec"; key: keyof LiveCounts }
-  | { kind: "reset" };
+type TeamLog = {
+  id: string;
+  name: string;
+  createdAt: number;
+};
 
-const STORAGE_KEY = "flyStatTracker.games.v2";
-
-/** Paywall storage (local) */
-type Plan = "single_game" | "season" | "unlimited_monthly" | "unlimited_annual";
 type Entitlements = {
-  plan: "free" | "season" | "monthly" | "annual";
-  /** counts of single-game credits purchased */
-  singleCredits: number;
-  /** credits already consumed by successful saves after trial ended */
-  singleCreditsUsed: number;
+  plan: "free" | "season" | "single_game";
+  singleCreditsUsed: number; // for free saves tracking
   updatedAt: number;
 };
-const ENT_KEY = "flyStatTracker.entitlements.v1";
-const TRIAL_FREE_GAMES = 2;
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
+type SeasonWindowKey = "Fall" | "Winter" | "Spring" | "Summer";
 
-function todayISO() {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
+/** ---------------- Storage keys ---------------- */
+const STORAGE_KEY_GAMES = "fly_stat_tracker_games_v3";
+const STORAGE_KEY_ENT = "fly_stat_tracker_entitlements_v1";
+const STORAGE_KEY_TEAMLOGS = "fly_stat_tracker_team_logs_v1";
 
-function safeParse<T>(json: string | null, fallback: T): T {
+/** ---------------- Paywall rules ---------------- */
+const TRIAL_FREE_GAMES = 2; // global per device/user (per your request)
+
+/** ---------------- Helpers ---------------- */
+function safeParse<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
   try {
-    if (!json) return fallback;
-    return JSON.parse(json) as T;
+    return JSON.parse(raw) as T;
   } catch {
     return fallback;
   }
 }
 
-function pct(made: number, att: number) {
-  if (!att) return 0;
-  return (made / att) * 100;
-}
-
-function formatPct(v: number) {
-  return `${v.toFixed(1)}%`;
-}
-
 function makeId() {
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return Math.random().toString(36).slice(2) + "_" + Date.now().toString(36);
 }
 
-function clampNonNeg(n: number) {
+function todayISO() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function clamp0(n: number) {
+  if (!Number.isFinite(n)) return 0;
   return Math.max(0, n);
 }
 
-const emptyCounts: LiveCounts = {
-  made2: 0,
-  miss2: 0,
-  made3: 0,
-  miss3: 0,
-  madeFT: 0,
-  missFT: 0,
-  orb: 0,
-  drb: 0,
-  ast: 0,
-  to: 0,
-  stl: 0,
-  pf: 0,
-};
-
-function sumCounts(a: LiveCounts, b: LiveCounts): LiveCounts {
-  const out: any = {};
-  (Object.keys(emptyCounts) as (keyof LiveCounts)[]).forEach((k) => {
-    out[k] = a[k] + b[k];
-  });
-  return out as LiveCounts;
+function formatPct(made: number, att: number) {
+  if (att <= 0) return "0.0%";
+  return `${((made / att) * 100).toFixed(1)}%`;
 }
 
-function avg(numerator: number, denom: number) {
-  if (!denom) return 0;
-  return numerator / denom;
+function formatAvg(total: number, games: number) {
+  if (games <= 0) return "0.0";
+  return (total / games).toFixed(1);
 }
 
-function StatChip({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="chip">
-      <div className="chipLabel">{label}</div>
-      <div className="chipValue">{value}</div>
-    </div>
+function sumCounts(games: GameEntry[]): Counts {
+  return games.reduce(
+    (acc, g) => {
+      const c = g.counts;
+      acc.made2 += c.made2;
+      acc.miss2 += c.miss2;
+      acc.made3 += c.made3;
+      acc.miss3 += c.miss3;
+      acc.ftm += c.ftm;
+      acc.fta += c.fta;
+      acc.orb += c.orb;
+      acc.drb += c.drb;
+      acc.ast += c.ast;
+      acc.to += c.to;
+      acc.stl += c.stl;
+      acc.pf += c.pf;
+      return acc;
+    },
+    {
+      made2: 0,
+      miss2: 0,
+      made3: 0,
+      miss3: 0,
+      ftm: 0,
+      fta: 0,
+      orb: 0,
+      drb: 0,
+      ast: 0,
+      to: 0,
+      stl: 0,
+      pf: 0,
+    }
   );
 }
 
-function TapButton({
-  id,
-  activeId,
-  onTap,
-  title,
-  sub,
-  tone,
-}: {
-  id: string;
-  activeId: string | null;
-  onTap: () => void;
-  title: string;
-  sub: string;
-  tone: "good" | "bad" | "neutral";
-}) {
-  const cls =
-    "tapBtn " +
-    (tone === "good" ? "tapBtnGood " : "") +
-    (tone === "bad" ? "tapBtnBad " : "tapBtnNeutral ") +
-    (activeId === id ? "tapBtnActive" : "");
+function getSeasonWindow(key: SeasonWindowKey, now = new Date()) {
+  // Windows:
+  // Fall: Aug 1 - Oct 31
+  // Winter: Nov 1 - Jan 31 (spans year)
+  // Spring: Feb 1 - Apr 30
+  // Summer: May 1 - Jul 31
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
 
-  return (
-    <button className={cls} onClick={onTap} type="button">
-      <div className="tapBtnTitle">{title}</div>
-      <div className="tapBtnSub">{sub}</div>
-    </button>
-  );
+  let startY = y;
+  let endY = y;
+  let start = "";
+  let end = "";
+  let label = "";
+
+  if (key === "Fall") {
+    start = `${y}-08-01`;
+    end = `${y}-10-31`;
+    label = `Fall ${y}`;
+  } else if (key === "Winter") {
+    startY = m === 1 ? y - 1 : y;
+    endY = startY + 1;
+    start = `${startY}-11-01`;
+    end = `${endY}-01-31`;
+    label = `Winter ${startY}-${endY}`;
+  } else if (key === "Spring") {
+    start = `${y}-02-01`;
+    end = `${y}-04-30`;
+    label = `Spring ${y}`;
+  } else {
+    start = `${y}-05-01`;
+    end = `${y}-07-31`;
+    label = `Summer ${y}`;
+  }
+
+  return { key, label, start, end };
 }
 
+/** ---------------- Component ---------------- */
 export default function GameTracker() {
-  const [games, setGames] = useState<GameEntry[]>([]);
-  const [counts, setCounts] = useState<LiveCounts>({ ...emptyCounts });
+  const tapTimeoutRef = useRef<number | null>(null);
 
+  // ----- Games / logs -----
+  const [games, setGames] = useState<GameEntry[]>([]);
+  const [teamLogs, setTeamLogs] = useState<TeamLog[]>([]);
+  const [selectedTeamLogId, setSelectedTeamLogId] = useState<string>("");
+
+  // Create Team Log
+  const [newTeamLogName, setNewTeamLogName] = useState("");
+
+  // ----- Entitlements (paywall) -----
+  const [ent, setEnt] = useState<Entitlements>({
+    plan: "free",
+    singleCreditsUsed: 0,
+    updatedAt: Date.now(),
+  });
+
+  // ----- Form fields -----
   const [date, setDate] = useState<string>(todayISO());
   const [team, setTeam] = useState<string>("Fly Academy");
   const [opponent, setOpponent] = useState<string>("");
   const [playerName, setPlayerName] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  const [selectedPlayer, setSelectedPlayer] = useState<string>("");
-  const [lastTapId, setLastTapId] = useState<string | null>(null);
-  const [history, setHistory] = useState<Action[]>([]);
-
-  const mountedRef = useRef(false);
-
-  // Stable tap flash timeout
-  const tapTimeoutRef = useRef<number | null>(null);
-
-  // Share UI + status
-  const [shareOpen, setShareOpen] = useState(false);
-  const [shareStatus, setShareStatus] = useState<"" | "copied" | "shared" | "error">("");
-  const shareTimeoutRef = useRef<number | null>(null);
-
-  // Keep last saved entry (so Share Current Game can fall back if live is empty)
-  const [lastSavedEntry, setLastSavedEntry] = useState<GameEntry | null>(null);
-
-  // --- Paywall state ---
-  const [showUpgrade, setShowUpgrade] = useState(false);
-  const [ent, setEnt] = useState<Entitlements>({
-    plan: "free",
-    singleCredits: 0,
-    singleCreditsUsed: 0,
-    updatedAt: Date.now(),
+  const [counts, setCounts] = useState<Counts>({
+    made2: 0,
+    miss2: 0,
+    made3: 0,
+    miss3: 0,
+    ftm: 0,
+    fta: 0,
+    orb: 0,
+    drb: 0,
+    ast: 0,
+    to: 0,
+    stl: 0,
+    pf: 0,
   });
 
-  // Load games + entitlements once
+  // ----- Right side selections -----
+  const [selectedPlayer, setSelectedPlayer] = useState<string>("");
+
+  // ----- Safety modals -----
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showUndoConfirm, setShowUndoConfirm] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  // ----- Paywall + Season pick -----
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [showSeasonPick, setShowSeasonPick] = useState(false);
+  const [seasonPick, setSeasonPick] = useState<SeasonWindowKey | "">("");
+
+  // ----- Undo tracking -----
+  const [lastSavedEntry, setLastSavedEntry] = useState<GameEntry | null>(null);
+
+  /** ---------------- Load from storage ---------------- */
   useEffect(() => {
     const loadedGames = safeParse<GameEntry[]>(
-      typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null,
+      typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_GAMES) : null,
       []
     );
-    setGames(Array.isArray(loadedGames) ? loadedGames : []);
 
     const loadedEnt = safeParse<Entitlements>(
-      typeof window !== "undefined" ? localStorage.getItem(ENT_KEY) : null,
-      {
-        plan: "free",
-        singleCredits: 0,
-        singleCreditsUsed: 0,
-        updatedAt: Date.now(),
-      }
+      typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_ENT) : null,
+      { plan: "free", singleCreditsUsed: 0, updatedAt: Date.now() }
     );
-    setEnt({
-      plan: loadedEnt.plan ?? "free",
-      singleCredits: loadedEnt.singleCredits ?? 0,
-      singleCreditsUsed: loadedEnt.singleCreditsUsed ?? 0,
-      updatedAt: loadedEnt.updatedAt ?? Date.now(),
-    });
 
-    mountedRef.current = true;
+    const loadedLogs = safeParse<TeamLog[]>(
+      typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_TEAMLOGS) : null,
+      []
+    );
+
+    setGames(Array.isArray(loadedGames) ? loadedGames : []);
+    setEnt(loadedEnt);
+
+    let logs = Array.isArray(loadedLogs) ? loadedLogs : [];
+    if (logs.length === 0) {
+      const defaultLog: TeamLog = { id: makeId(), name: "Fly Academy", createdAt: Date.now() };
+      logs = [defaultLog];
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STORAGE_KEY_TEAMLOGS, JSON.stringify(logs));
+      }
+    }
+    setTeamLogs(logs);
+
+    const defaultLogId = logs[0]?.id || "";
+    setSelectedTeamLogId(defaultLogId);
+
+    const players = Array.from(
+      new Set((Array.isArray(loadedGames) ? loadedGames : []).filter((g) => g.teamLogId === defaultLogId).map((g) => g.playerName))
+    ).sort();
+    setSelectedPlayer(players[0] || "");
   }, []);
 
-  // Persist games
-  useEffect(() => {
-    if (!mountedRef.current) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(games));
-  }, [games]);
-
-  // Persist entitlements
-  useEffect(() => {
-    if (!mountedRef.current) return;
-    localStorage.setItem(ENT_KEY, JSON.stringify(ent));
-  }, [ent]);
-
-  // Keep selected player sensible
-  useEffect(() => {
-    const names = Array.from(new Set(games.map((g) => g.playerName).filter(Boolean))).sort();
-    const fallback = playerName.trim() || names[0] || "";
-    if (!selectedPlayer) setSelectedPlayer(fallback);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [games]);
-
-  // Derived stats (live)
-  const scoring = useMemo(() => {
-    const fgm = counts.made2 + counts.made3;
-    const fga = counts.made2 + counts.miss2 + counts.made3 + counts.miss3;
-
-    const tpm = counts.made3;
-    const tpa = counts.made3 + counts.miss3;
-
-    const ftm = counts.madeFT;
-    const fta = counts.madeFT + counts.missFT;
-
-    const pts = counts.made2 * 2 + counts.made3 * 3 + counts.madeFT;
-
-    return {
-      pts,
-      fgm,
-      fga,
-      fgPct: pct(fgm, fga),
-      tpm,
-      tpa,
-      tpPct: pct(tpm, tpa),
-      ftm,
-      fta,
-      ftPct: pct(ftm, fta),
-    };
-  }, [counts]);
-
-  const ttlRebs = counts.orb + counts.drb;
-
-  // Player list + selected games
-  const playerNames = useMemo(() => {
-    const set = new Set<string>();
-    games.forEach((g) => {
-      if (g.playerName?.trim()) set.add(g.playerName.trim());
-    });
-    if (playerName.trim()) set.add(playerName.trim());
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [games, playerName]);
-
-  const gamesForSelected = useMemo(() => {
-    const p = selectedPlayer.trim();
-    if (!p) return [];
-    return games
-      .filter((g) => g.playerName.trim() === p)
-      .sort((a, b) => b.createdAt - a.createdAt);
-  }, [games, selectedPlayer]);
-
-  // Season-to-date aggregates (selected player)
-  const season = useMemo(() => {
-    const total = gamesForSelected.reduce(
-      (acc, g) => sumCounts(acc, g.counts),
-      { ...emptyCounts }
-    );
-    const n = gamesForSelected.length;
-
-    const fgm = total.made2 + total.made3;
-    const fga = total.made2 + total.miss2 + total.made3 + total.miss3;
-
-    const tpm = total.made3;
-    const tpa = total.made3 + total.miss3;
-
-    const ftm = total.madeFT;
-    const fta = total.madeFT + total.missFT;
-
-    const pts = total.made2 * 2 + total.made3 * 3 + total.madeFT;
-
-    const rpg = avg(total.orb + total.drb, n);
-    const orbg = avg(total.orb, n);
-    const drbg = avg(total.drb, n);
-
-    return {
-      games: n,
-      total,
-      ppg: avg(pts, n),
-      rpg,
-      orbg,
-      drbg,
-      apg: avg(total.ast, n),
-      topg: avg(total.to, n),
-      stlg: avg(total.stl, n),
-      pfpg: avg(total.pf, n),
-      fgPct: pct(fgm, fga),
-      tpPct: pct(tpm, tpa),
-      ftPct: pct(ftm, fta),
-    };
-  }, [gamesForSelected]);
-
-  const hasAnyLiveCounts = (c: LiveCounts) =>
-    (Object.keys(emptyCounts) as (keyof LiveCounts)[]).some((k) => c[k] > 0);
-
-  // --- Tap feedback ---
-  const tapFeedback = (id: string) => {
-    setLastTapId(id);
-    if (tapTimeoutRef.current) window.clearTimeout(tapTimeoutRef.current);
-    tapTimeoutRef.current = window.setTimeout(() => setLastTapId(null), 120);
-
-    // Optional subtle vibration (always-on if device supports; no UI toggle)
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-      try {
-        // @ts-ignore
-        navigator.vibrate(12);
-      } catch {}
-    }
-  };
-
-  // --- Actions ---
-  const inc = (key: keyof LiveCounts, tapId: string) => {
-    tapFeedback(tapId);
-    setCounts((c) => ({ ...c, [key]: c[key] + 1 }));
-    setHistory((h) => [...h, { kind: "inc", key }]);
-  };
-
-  const dec = (key: keyof LiveCounts) => {
-    setCounts((c) => ({ ...c, [key]: clampNonNeg(c[key] - 1) }));
-    setHistory((h) => [...h, { kind: "dec", key }]);
-  };
-
-  const undo = () => {
-    setHistory((h) => {
-      if (!h.length) return h;
-      const last = h[h.length - 1];
-
-      setCounts((c) => {
-        if (last.kind === "inc") {
-          return { ...c, [last.key]: clampNonNeg(c[last.key] - 1) };
-        }
-        if (last.kind === "dec") {
-          return { ...c, [last.key]: c[last.key] + 1 };
-        }
-        if (last.kind === "reset") {
-          return c;
-        }
-        return c;
-      });
-
-      return h.slice(0, -1);
-    });
-  };
-
-  const resetLive = () => {
-    setCounts({ ...emptyCounts });
-    setHistory((h) => [...h, { kind: "reset" }]);
-  };
-
-  const describeAction = (a: Action) => {
-    if (a.kind === "reset") return "Reset";
-    const pretty = String(a.key).toUpperCase();
-    return a.kind === "inc" ? `+${pretty}` : `-${pretty}`;
-  };
-
-  const confirmUndo = () => {
-    if (!history.length) return;
-    const last = history[history.length - 1];
-    const ok = window.confirm(
-      `Undo last action: ${describeAction(last)}?\n\nThis will revert your most recent tap.`
-    );
-    if (ok) undo();
-  };
-
-  const confirmReset = () => {
-    const hasStats =
-      (Object.values(counts) as number[]).some((v) => Number(v) > 0) || history.length > 0;
-
-    if (!hasStats) return;
-
-    const who = (playerName || "").trim() || "this player";
-    const ok = window.confirm(
-      `Are you sure you want to clear ${who}'s live stats?\n\nThis will NOT delete saved games.`
-    );
-    if (ok) resetLive();
-  };
-
-  // ---------- PAYWALL HELPERS ----------
-  const gamesSavedCount = games.length;
-
-  const isUnlimited = ent.plan === "season" || ent.plan === "monthly" || ent.plan === "annual";
-  const creditsRemaining = Math.max(0, ent.singleCredits - ent.singleCreditsUsed);
-
-  const canSaveAnotherGame = () => {
-    if (isUnlimited) return true;
-    if (gamesSavedCount < TRIAL_FREE_GAMES) return true; // #1 and #2 are free
-    return creditsRemaining > 0; // after free trial, need credit unless unlimited
-  };
-
-  const consumeOneSaveIfNeeded = () => {
-    // Only consume credits AFTER the 2 free saves
-    if (isUnlimited) return;
-    if (gamesSavedCount < TRIAL_FREE_GAMES) return;
-    if (creditsRemaining > 0) {
-      setEnt((prev) => ({
-        ...prev,
-        singleCreditsUsed: (prev.singleCreditsUsed ?? 0) + 1,
-        updatedAt: Date.now(),
-      }));
-    }
-  };
-
-  const applyPurchaseFromReturn = (plan: Plan) => {
-    setEnt((prev) => {
-      if (plan === "single_game") {
-        return {
-          ...prev,
-          singleCredits: (prev.singleCredits ?? 0) + 1,
-          updatedAt: Date.now(),
-        };
-      }
-      if (plan === "season") {
-        return { ...prev, plan: "season", updatedAt: Date.now() };
-      }
-      if (plan === "unlimited_monthly") {
-        return { ...prev, plan: "monthly", updatedAt: Date.now() };
-      }
-      if (plan === "unlimited_annual") {
-        return { ...prev, plan: "annual", updatedAt: Date.now() };
-      }
-      return prev;
-    });
-  };
-
-  const startCheckout = async (plan: Plan) => {
-    try {
-      const res = await fetch("/api/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
-      });
-      if (!res.ok) throw new Error("checkout_failed");
-      const data = (await res.json()) as { url?: string };
-      if (!data?.url) throw new Error("missing_url");
-      window.location.href = data.url;
-    } catch {
-      alert("Checkout error. Please try again.");
-    }
-  };
-
-  // On return from Stripe, accept ?plan=... and unlock
+  /** ---------------- Persist ---------------- */
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const plan = params.get("plan") as Plan | null;
-    if (plan) {
-      applyPurchaseFromReturn(plan);
-      // Clean URL (remove plan param)
-      params.delete("plan");
-      const newQs = params.toString();
-      const newUrl = `${window.location.pathname}${newQs ? `?${newQs}` : ""}`;
-      window.history.replaceState({}, "", newUrl);
+    localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(games));
+  }, [games]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(STORAGE_KEY_ENT, JSON.stringify(ent));
+  }, [ent]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(STORAGE_KEY_TEAMLOGS, JSON.stringify(teamLogs));
+  }, [teamLogs]);
+
+  /** ---------------- Derived live values ---------------- */
+  const pts = counts.made2 * 2 + counts.made3 * 3 + counts.ftm;
+
+  const fgMade = counts.made2 + counts.made3;
+  const fgAtt = fgMade + counts.miss2 + counts.miss3;
+
+  const threeMade = counts.made3;
+  const threeAtt = counts.made3 + counts.miss3;
+
+  const ftMade = counts.ftm;
+  const ftAtt = counts.fta;
+
+  const ttlReb = counts.orb + counts.drb;
+
+  const fgPct = formatPct(fgMade, fgAtt);
+  const threePct = formatPct(threeMade, threeAtt);
+  const ftPct = formatPct(ftMade, ftAtt);
+
+  /** ---------------- Team Log + Player filters ---------------- */
+  const gamesForTeamLog = useMemo(() => {
+    if (!selectedTeamLogId) return [];
+    return games.filter((g) => g.teamLogId === selectedTeamLogId);
+  }, [games, selectedTeamLogId]);
+
+  const playersForTeamLog = useMemo(() => {
+    return Array.from(new Set(gamesForTeamLog.map((g) => g.playerName))).sort();
+  }, [gamesForTeamLog]);
+
+  useEffect(() => {
+    if (!selectedTeamLogId) return;
+    if (!selectedPlayer || !playersForTeamLog.includes(selectedPlayer)) {
+      setSelectedPlayer(playersForTeamLog[0] || "");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedTeamLogId, playersForTeamLog.join("|")]);
 
-  // ---------- SAVE GAME (WITH PAYWALL GUARD) ----------
+  const gamesForSelection = useMemo(() => {
+    if (!selectedPlayer) return [];
+    return gamesForTeamLog.filter((g) => g.playerName === selectedPlayer);
+  }, [gamesForTeamLog, selectedPlayer]);
+
+  const seasonTotals = useMemo(() => sumCounts(gamesForSelection), [gamesForSelection]);
+  const seasonGamesCount = gamesForSelection.length;
+
+  /** ---------------- Season totals/averages for summary ---------------- */
+  const seasonPtsTotal = seasonTotals.made2 * 2 + seasonTotals.made3 * 3 + seasonTotals.ftm;
+
+  const seasonFgMade = seasonTotals.made2 + seasonTotals.made3;
+  const seasonFgAtt = seasonFgMade + seasonTotals.miss2 + seasonTotals.miss3;
+
+  const season3Made = seasonTotals.made3;
+  const season3Att = seasonTotals.made3 + seasonTotals.miss3;
+
+  const seasonFtMade = seasonTotals.ftm;
+  const seasonFtAtt = seasonTotals.fta;
+
+  const seasonRebTotal = seasonTotals.orb + seasonTotals.drb;
+  const seasonAstTotal = seasonTotals.ast;
+  const seasonStlTotal = seasonTotals.stl;
+  const seasonToTotal = seasonTotals.to;
+
+  /** ---------------- Exact Season Summary reorder (8 rows x 2 cols) ---------------- */
+  const seasonSummaryPairs = useMemo(() => {
+    const g = seasonGamesCount;
+
+    return [
+      // PTS (Total) | PPG
+      { leftLabel: "PTS (Total)", leftValue: String(seasonPtsTotal), rightLabel: "PPG", rightValue: formatAvg(seasonPtsTotal, g) },
+
+      // FG (Total) | FG%
+      {
+        leftLabel: "FG (Total)",
+        leftValue: `${seasonFgMade}-${seasonFgAtt}`,
+        rightLabel: "FG%",
+        rightValue: formatPct(seasonFgMade, seasonFgAtt),
+      },
+
+      // 3P (Total) | 3P%
+      {
+        leftLabel: "3P (Total)",
+        leftValue: `${season3Made}-${season3Att}`,
+        rightLabel: "3P%",
+        rightValue: formatPct(season3Made, season3Att),
+      },
+
+      // FT (Total) | FT%
+      {
+        leftLabel: "FT (Total)",
+        leftValue: `${seasonFtMade}-${seasonFtAtt}`,
+        rightLabel: "FT%",
+        rightValue: formatPct(seasonFtMade, seasonFtAtt),
+      },
+
+      // REB (Total O+D) | RPG (Total O+D)
+      {
+        leftLabel: "REB (Total O+D)",
+        leftValue: String(seasonRebTotal),
+        rightLabel: "RPG (Total O+D)",
+        rightValue: formatAvg(seasonRebTotal, g),
+      },
+
+      // AST (Total) | APG
+      {
+        leftLabel: "AST (Total)",
+        leftValue: String(seasonAstTotal),
+        rightLabel: "APG",
+        rightValue: formatAvg(seasonAstTotal, g),
+      },
+
+      // STL (Total) | SPG
+      {
+        leftLabel: "STL (Total)",
+        leftValue: String(seasonStlTotal),
+        rightLabel: "SPG",
+        rightValue: formatAvg(seasonStlTotal, g),
+      },
+
+      // TO (Total) | TO/G
+      {
+        leftLabel: "TO (Total)",
+        leftValue: String(seasonToTotal),
+        rightLabel: "TO/G",
+        rightValue: formatAvg(seasonToTotal, g),
+      },
+    ];
+  }, [
+    seasonGamesCount,
+    seasonPtsTotal,
+    seasonFgMade,
+    seasonFgAtt,
+    season3Made,
+    season3Att,
+    seasonFtMade,
+    seasonFtAtt,
+    seasonRebTotal,
+    seasonAstTotal,
+    seasonStlTotal,
+    seasonToTotal,
+  ]);
+
+  /** ---------------- Paywall guard (global) ---------------- */
+  const canSaveAnotherGame = () => {
+    if (ent.plan !== "free") return true;
+    return ent.singleCreditsUsed < TRIAL_FREE_GAMES;
+  };
+
+  /** ---------------- Checkout ---------------- */
+  function startCheckout(plan: "single_game" | "season", meta?: Record<string, any>) {
+    fetch("/api/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan, meta }),
+    })
+      .then(async (r) => {
+        if (!r.ok) throw new Error("Checkout failed");
+        return r.json();
+      })
+      .then((data) => {
+        if (data?.url) window.location.href = data.url;
+        else alert("Checkout error. Please try again.");
+      })
+      .catch(() => alert("Checkout error. Please try again."));
+  }
+
+  /** ---------------- Tap feedback ---------------- */
+  const flashTap = () => {
+    if (tapTimeoutRef.current) window.clearTimeout(tapTimeoutRef.current);
+    tapTimeoutRef.current = window.setTimeout(() => {
+      // no-op; you already have .tapped styling for buttons
+    }, 80);
+  };
+
+  const inc = (key: keyof Counts, delta: number) => {
+    flashTap();
+    setCounts((c) => ({ ...c, [key]: clamp0((c[key] as number) + delta) } as Counts));
+  };
+
+  /** ---------------- Team Logs ---------------- */
+  const addTeamLog = () => {
+    const name = newTeamLogName.trim();
+    if (!name) return;
+    const newLog: TeamLog = { id: makeId(), name, createdAt: Date.now() };
+    setTeamLogs((prev) => [newLog, ...prev]);
+    setSelectedTeamLogId(newLog.id);
+    setNewTeamLogName("");
+  };
+
+  /** ---------------- Save / Reset / Undo / Delete ---------------- */
+  const resetLive = () => {
+    setCounts({
+      made2: 0,
+      miss2: 0,
+      made3: 0,
+      miss3: 0,
+      ftm: 0,
+      fta: 0,
+      orb: 0,
+      drb: 0,
+      ast: 0,
+      to: 0,
+      stl: 0,
+      pf: 0,
+    });
+    setOpponent("");
+    setNotes("");
+  };
+
   const saveGame = () => {
     const p = playerName.trim();
     if (!p) {
@@ -512,7 +489,6 @@ export default function GameTracker() {
       return;
     }
 
-    // Paywall gate (2 free saves; 3rd attempt triggers upgrade)
     if (!canSaveAnotherGame()) {
       setShowUpgrade(true);
       return;
@@ -522,6 +498,7 @@ export default function GameTracker() {
       id: makeId(),
       createdAt: Date.now(),
       date: date || todayISO(),
+      teamLogId: selectedTeamLogId || teamLogs[0]?.id || "",
       team: team.trim() || "Fly Academy",
       opponent: opponent.trim(),
       playerName: p,
@@ -529,267 +506,86 @@ export default function GameTracker() {
       counts: { ...counts },
     };
 
-    // If we’re past the 2 free saves and not unlimited, consume one credit
-    consumeOneSaveIfNeeded();
-
     setGames((g) => [entry, ...g]);
     setSelectedPlayer(p);
     setLastSavedEntry(entry);
 
+    // Global free-saves tracking per device/user
+    if (ent.plan === "free") {
+      setEnt((prev) => ({
+        ...prev,
+        singleCreditsUsed: prev.singleCreditsUsed + 1,
+        updatedAt: Date.now(),
+      }));
+    }
+
     resetLive();
   };
 
-  const deleteGame = (id: string) => {
+  const confirmSaveGame = () => {
+    setShowSaveConfirm(false);
+    saveGame();
+  };
+
+  const undoLastSave = () => {
+    if (!lastSavedEntry) return;
+    const id = lastSavedEntry.id;
     setGames((g) => g.filter((x) => x.id !== id));
+    setLastSavedEntry(null);
+  };
+
+  const requestDeleteGame = (id: string) => setPendingDeleteId(id);
+
+  const confirmDeleteGame = () => {
+    if (!pendingDeleteId) return;
+    const id = pendingDeleteId;
+    setGames((g) => g.filter((x) => x.id !== id));
+    setPendingDeleteId(null);
     setLastSavedEntry((prev) => (prev?.id === id ? null : prev));
   };
 
-  // ---------- SHARE (text) ----------
-  const buildShareTextCurrentGame = (entry: GameEntry) => {
-    const c = entry.counts;
+  /** ---------------- Pill rendering (overflow-safe) ---------------- */
+  function PillValue({ value }: { value: string | number }) {
+    const text = typeof value === "number" ? String(value) : value;
+    const tight = text.length >= 6; // catches "100.0%" etc
 
-    const fgm = c.made2 + c.made3;
-    const fga = c.made2 + c.miss2 + c.made3 + c.miss3;
-    const tpm = c.made3;
-    const tpa = c.made3 + c.miss3;
-    const ftm = c.madeFT;
-    const fta = c.madeFT + c.missFT;
-    const pts = c.made2 * 2 + c.made3 * 3 + c.madeFT;
-
-    const ttl = c.orb + c.drb;
-
-    const lines: string[] = [];
-    lines.push(`Fly Stat Tracker — Current Game`);
-    lines.push(`${entry.playerName}${entry.date ? ` • ${entry.date}` : ""}`);
-
-    const metaParts: string[] = [];
-    if (entry.opponent?.trim()) metaParts.push(`vs ${entry.opponent.trim()}`);
-    if (entry.team?.trim()) metaParts.push(entry.team.trim());
-    if (metaParts.length) lines.push(metaParts.join(" • "));
-
-    lines.push(``);
-    lines.push(`PTS ${pts}`);
-    lines.push(`FG ${fgm}-${fga} (${formatPct(pct(fgm, fga))})`);
-    lines.push(`3P ${tpm}-${tpa} (${formatPct(pct(tpm, tpa))})`);
-    lines.push(`FT ${ftm}-${fta} (${formatPct(pct(ftm, fta))})`);
-    lines.push(``);
-    lines.push(
-      `REB ${ttl} (O ${c.orb} / D ${c.drb})  AST ${c.ast}  TO ${c.to}  STL ${c.stl}  PF ${c.pf}`
+    return (
+      <div className="pillValue">
+        <span className={`chipValueText ${tight ? "chipValueText--tight" : "chipValueText--fit"}`}>{text}</span>
+      </div>
     );
+  }
 
-    if (entry.notes?.trim()) {
-      lines.push(``);
-      lines.push(`Notes: ${entry.notes.trim()}`);
-    }
-
-    return lines.join("\n");
-  };
-
-  const buildShareTextSeasonLean = (player: string) => {
-    const p = player.trim();
-    const n = gamesForSelected.length;
-
-    if (!p) return `Fly Stat Tracker — Season Summary\n\nNo player selected.`;
-    if (!n) return `Fly Stat Tracker — Season Summary\n\n${p}: No saved games yet.`;
-
-    const lines: string[] = [];
-    lines.push(`Fly Stat Tracker — Season Summary`);
-    lines.push(`${p} • ${n} games`);
-    lines.push(``);
-    lines.push(`Averages per game:`);
-    lines.push(
-      `PPG ${season.ppg.toFixed(1)}  RPG ${season.rpg.toFixed(1)}  APG ${season.apg.toFixed(1)}`
-    );
-    lines.push(
-      `FG% ${formatPct(season.fgPct)}  3P% ${formatPct(season.tpPct)}  FT% ${formatPct(season.ftPct)}`
-    );
-    lines.push(
-      `ORB/G ${season.orbg.toFixed(1)}  DRB/G ${season.drbg.toFixed(1)}  STL/G ${season.stlg.toFixed(
-        1
-      )}  TO/G ${season.topg.toFixed(1)}`
-    );
-
-    return lines.join("\n");
-  };
-
-  const doShareText = async (text: string) => {
-    try {
-      setShareStatus("");
-      if (shareTimeoutRef.current) window.clearTimeout(shareTimeoutRef.current);
-
-      const navAny = navigator as any;
-
-      if (navAny?.share) {
-        await navAny.share({ title: "Fly Stat Tracker", text });
-        setShareStatus("shared");
-      } else if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        setShareStatus("copied");
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.position = "fixed";
-        ta.style.left = "-9999px";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-        setShareStatus("copied");
-      }
-
-      shareTimeoutRef.current = window.setTimeout(() => setShareStatus(""), 1600);
-    } catch {
-      setShareStatus("error");
-      shareTimeoutRef.current = window.setTimeout(() => setShareStatus(""), 1600);
-    }
-  };
-
-  const shareCurrentGame = async () => {
-    const pName =
-      playerName.trim() || selectedPlayer.trim() || lastSavedEntry?.playerName || "Player";
-
-    const draft: GameEntry = {
-      id: "draft",
-      createdAt: Date.now(),
-      date: date || todayISO(),
-      team: team.trim() || "Fly Academy",
-      opponent: opponent.trim(),
-      playerName: pName,
-      notes: notes.trim() || undefined,
-      counts: { ...counts },
-    };
-
-    // Prefer live if any counts; otherwise fall back to last saved
-    const entryToShare = hasAnyLiveCounts(counts) ? draft : lastSavedEntry ?? draft;
-
-    await doShareText(buildShareTextCurrentGame(entryToShare));
-  };
-
-  const shareSeason = async () => {
-    const p = selectedPlayer.trim() || playerName.trim();
-    await doShareText(buildShareTextSeasonLean(p));
-  };
-
+  /** ---------------- UI ---------------- */
   return (
     <div className="page">
-      <div className="topBar">
+      <div className="topbar">
         <div>
-          <div className="kicker">PREPARE FOR TAKEOFF</div>
+          <div className="eyebrow">PREPARE FOR TAKEOFF</div>
           <h1 className="title">FLY STAT TRACKER</h1>
-          <div className="subtitle">Track your Player's stats for a game or for a season.</div>
+          <div className="subtitle">Track your Player&apos;s stats for a game or for a season.</div>
         </div>
 
         <div className="topActions">
-          <button className="ghostBtn" onClick={confirmUndo} type="button" disabled={!history.length}>
+          <button className="ghostBtn" type="button" onClick={() => setShowUndoConfirm(true)} disabled={!lastSavedEntry}>
             Undo
           </button>
-
-          <button className="ghostBtn" onClick={confirmReset} type="button">
+          <button className="ghostBtn" type="button" onClick={() => setShowResetConfirm(true)}>
             Reset
           </button>
-
-          <button className="ghostBtn" onClick={() => setShareOpen(true)} type="button">
-            Share
-            {shareStatus ? (
-              <span className="pill" aria-live="polite">
-                {shareStatus === "copied" ? "Copied" : shareStatus === "shared" ? "Shared" : "Error"}
-              </span>
-            ) : null}
-          </button>
+          {/* If you have Share already elsewhere, keep it. Leaving out here to preserve your current layout. */}
         </div>
       </div>
 
-      {shareOpen ? (
-        <div className="modalOverlay" role="dialog" aria-modal="true" aria-label="Share options">
-          <div className="modal">
-            <div className="modalTitle">Share</div>
-            <div className="modalHint">Choose what you want to share</div>
-
-            <div className="modalButtons">
-              <button
-                className="modalBtn"
-                type="button"
-                onClick={async () => {
-                  setShareOpen(false);
-                  await shareCurrentGame();
-                }}
-              >
-                Share Current Game
-              </button>
-
-              <button
-                className="modalBtn"
-                type="button"
-                onClick={async () => {
-                  setShareOpen(false);
-                  await shareSeason();
-                }}
-                disabled={!selectedPlayer.trim() && !playerName.trim()}
-                title={!selectedPlayer.trim() && !playerName.trim() ? "Select or enter a player first" : ""}
-              >
-                Share Overall Season
-              </button>
-
-              <button className="modalBtnSecondary" type="button" onClick={() => setShareOpen(false)}>
-                Cancel
-              </button>
-            </div>
-
-            <div className="modalMicro">Tip: “Season” uses saved games for the selected player.</div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* PAYWALL MODAL (no layout changes elsewhere) */}
-      {showUpgrade ? (
-        <div className="modalOverlay" role="dialog" aria-modal="true" aria-label="Upgrade options">
-          <div className="modal">
-            <div className="modalTitle">Unlock Saving</div>
-            <div className="modalHint">
-              You've used your {TRIAL_FREE_GAMES} free game saves. Upgrade to continue saving games and viewing season stats.
-            </div>
-
-            <div className="modalButtons">
-              <button className="modalBtn" type="button" onClick={() => startCheckout("single_game")}>
-                Add This Game ($6.99)
-              </button>
-
-              <button className="modalBtn" type="button" onClick={() => startCheckout("season")}>
-                Season Pass ($19.99)
-              </button>
-
-              <button className="modalBtn" type="button" onClick={() => startCheckout("unlimited_monthly")}>
-                Unlimited Monthly ($4.99/mo)
-              </button>
-
-              <button className="modalBtn" type="button" onClick={() => startCheckout("unlimited_annual")}>
-                Unlimited Annual ($49/yr)
-              </button>
-
-              <button className="modalBtnSecondary" type="button" onClick={() => setShowUpgrade(false)}>
-                Cancel
-              </button>
-            </div>
-
-            <div className="modalMicro">
-              Free saves: {Math.min(gamesSavedCount, TRIAL_FREE_GAMES)}/{TRIAL_FREE_GAMES}
-              {" • "}
-              Credits remaining: {creditsRemaining}
-              {" • "}
-              Plan: {ent.plan}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="grid">
-        {/* LEFT: Live game tracker */}
+      <div className="mainGrid">
+        {/* LEFT: Live Game Tracker */}
         <div className="card">
           <div className="cardHeader">
             <div>
               <div className="cardTitle">Live Game Tracker</div>
             </div>
-            <button className="primaryBtn" onClick={saveGame} type="button">
+
+            <button className="primaryBtn" type="button" onClick={() => setShowSaveConfirm(true)}>
               Save Game
             </button>
           </div>
@@ -809,83 +605,171 @@ export default function GameTracker() {
               <div className="label">
                 PLAYER NAME <span className="req">*</span>
               </div>
-              <input
-                className="input"
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value)}
-                placeholder="ex: Jordan Smith"
-              />
+              <input className="input" value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="ex: Jordan Smith" />
             </div>
 
             <div className="field">
               <div className="label">OPPONENT</div>
-              <input
-                className="input"
-                value={opponent}
-                onChange={(e) => setOpponent(e.target.value)}
-                placeholder="ex: Team Alpha 14U"
-              />
+              <input className="input" value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder="ex: Team Alpha 14U" />
             </div>
           </div>
 
-          {/* STAT TILES — TWO HORIZONTAL ROWS (7 across) */}
-          <div className="statTilesWrap">
-            <div className="statTilesRow">
-              <StatChip label="PTS" value={scoring.pts} />
-              <StatChip label="FG" value={`${scoring.fgm}-${scoring.fga}`} />
-              <StatChip label="FG%" value={formatPct(scoring.fgPct)} />
-              <StatChip label="3P FG" value={`${scoring.tpm}-${scoring.tpa}`} />
-              <StatChip label="3P FG%" value={formatPct(scoring.tpPct)} />
-              <StatChip label="FT" value={`${scoring.ftm}-${scoring.fta}`} />
-              <StatChip label="FT%" value={formatPct(scoring.ftPct)} />
+          {/* Live stat pills row 1 */}
+          <div className="pillsRow">
+            <div className="pill">
+              <div className="pillLabel">PTS</div>
+              <PillValue value={pts} />
             </div>
 
-            <div className="statTilesRow statTilesRow2">
-              <StatChip label="O REBS" value={counts.orb} />
-              <StatChip label="D REBS" value={counts.drb} />
-              <StatChip label="TTL REBS" value={ttlRebs} />
-              <StatChip label="AST" value={counts.ast} />
-              <StatChip label="TO" value={counts.to} />
-              <StatChip label="STLS" value={counts.stl} />
-              <StatChip label="FOULS" value={counts.pf} />
+            <div className="pill">
+              <div className="pillLabel">FG</div>
+              <PillValue value={`${fgMade}-${fgAtt}`} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">FG%</div>
+              <PillValue value={fgPct} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">3P FG</div>
+              <PillValue value={`${threeMade}-${threeAtt}`} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">3P FG%</div>
+              <PillValue value={threePct} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">FT</div>
+              <PillValue value={`${ftMade}-${ftAtt}`} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">FT%</div>
+              <PillValue value={ftPct} />
+            </div>
+          </div>
+
+          {/* Live stat pills row 2 */}
+          <div className="pillsRow">
+            <div className="pill">
+              <div className="pillLabel">O REBS</div>
+              <PillValue value={counts.orb} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">D REBS</div>
+              <PillValue value={counts.drb} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">TTL REBS</div>
+              <PillValue value={ttlReb} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">AST</div>
+              <PillValue value={counts.ast} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">TO</div>
+              <PillValue value={counts.to} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">STLS</div>
+              <PillValue value={counts.stl} />
+            </div>
+
+            <div className="pill">
+              <div className="pillLabel">FOULS</div>
+              <PillValue value={counts.pf} />
             </div>
           </div>
 
           <div className="sectionLabel">SCORING</div>
-          <div className="btnGrid2">
-            <TapButton id="made2" activeId={lastTapId} tone="good" title="+2" sub="Made 2PT" onTap={() => inc("made2", "made2")} />
-            <TapButton id="miss2" activeId={lastTapId} tone="bad" title="2 Miss" sub="Missed 2PT" onTap={() => inc("miss2", "miss2")} />
-            <TapButton id="made3" activeId={lastTapId} tone="good" title="+3" sub="Made 3PT" onTap={() => inc("made3", "made3")} />
-            <TapButton id="miss3" activeId={lastTapId} tone="bad" title="3 Miss" sub="Missed 3PT" onTap={() => inc("miss3", "miss3")} />
-            <TapButton id="madeFT" activeId={lastTapId} tone="good" title="+FT" sub="Made FT" onTap={() => inc("madeFT", "madeFT")} />
-            <TapButton id="missFT" activeId={lastTapId} tone="bad" title="FT Miss" sub="Missed FT" onTap={() => inc("missFT", "missFT")} />
+          <div className="tileGrid">
+            <button className="tileBtn tileGood" type="button" onClick={() => inc("made2", 1)}>
+              <div className="tileTop">+2</div>
+              <div className="tileSub">Made 2PT</div>
+            </button>
+
+            <button className="tileBtn tileBad" type="button" onClick={() => inc("miss2", 1)}>
+              <div className="tileTop">2 Miss</div>
+              <div className="tileSub">Missed 2PT</div>
+            </button>
+
+            <button className="tileBtn tileGood" type="button" onClick={() => inc("made3", 1)}>
+              <div className="tileTop">+3</div>
+              <div className="tileSub">Made 3PT</div>
+            </button>
+
+            <button className="tileBtn tileBad" type="button" onClick={() => inc("miss3", 1)}>
+              <div className="tileTop">3 Miss</div>
+              <div className="tileSub">Missed 3PT</div>
+            </button>
+
+            <button
+              className="tileBtn tileGood"
+              type="button"
+              onClick={() => {
+                inc("ftm", 1);
+                inc("fta", 1);
+              }}
+            >
+              <div className="tileTop">+FT</div>
+              <div className="tileSub">Made FT</div>
+            </button>
+
+            <button className="tileBtn tileBad" type="button" onClick={() => inc("fta", 1)}>
+              <div className="tileTop">FT Miss</div>
+              <div className="tileSub">Missed FT</div>
+            </button>
           </div>
 
-          <div className="sectionLabel" style={{ marginTop: 14 }}>
-            HUSTLE + OTHER
-          </div>
-          <div className="btnGrid3">
-            <TapButton id="orb" activeId={lastTapId} tone="neutral" title="ORB" sub="Off. Rebound" onTap={() => inc("orb", "orb")} />
-            <TapButton id="drb" activeId={lastTapId} tone="neutral" title="DRB" sub="Def. Rebound" onTap={() => inc("drb", "drb")} />
-            <TapButton id="ast" activeId={lastTapId} tone="neutral" title="AST" sub="Assist" onTap={() => inc("ast", "ast")} />
-            <TapButton id="to" activeId={lastTapId} tone="neutral" title="TO" sub="Turnover" onTap={() => inc("to", "to")} />
-            <TapButton id="stl" activeId={lastTapId} tone="neutral" title="STL" sub="Steal" onTap={() => inc("stl", "stl")} />
-            <TapButton id="pf" activeId={lastTapId} tone="neutral" title="FOUL" sub="Personal" onTap={() => inc("pf", "pf")} />
+          <div className="sectionLabel">HUSTLE + OTHER</div>
+          <div className="tileGrid">
+            <button className="tileBtn tileHustle" type="button" onClick={() => inc("orb", 1)}>
+              <div className="tileTop">ORB</div>
+              <div className="tileSub">Off. Rebound</div>
+            </button>
+
+            <button className="tileBtn tileHustle" type="button" onClick={() => inc("drb", 1)}>
+              <div className="tileTop">DRB</div>
+              <div className="tileSub">Def. Rebound</div>
+            </button>
+
+            <button className="tileBtn tileHustle" type="button" onClick={() => inc("ast", 1)}>
+              <div className="tileTop">AST</div>
+              <div className="tileSub">Assist</div>
+            </button>
+
+            <button className="tileBtn tileHustle" type="button" onClick={() => inc("to", 1)}>
+              <div className="tileTop">TO</div>
+              <div className="tileSub">Turnover</div>
+            </button>
+
+            <button className="tileBtn tileHustle" type="button" onClick={() => inc("stl", 1)}>
+              <div className="tileTop">STL</div>
+              <div className="tileSub">Steal</div>
+            </button>
+
+            <button className="tileBtn tileHustle" type="button" onClick={() => inc("pf", 1)}>
+              <div className="tileTop">FOUL</div>
+              <div className="tileSub">Foul</div>
+            </button>
           </div>
 
-          <div className="field" style={{ marginTop: 16 }}>
+          <div className="field" style={{ marginTop: 12 }}>
             <div className="label">NOTES</div>
-            <textarea
-              className="textarea"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional notes…"
-              rows={3}
-            />
+            <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes…" />
           </div>
 
           <div className="saveRow">
-            <button className="primaryBtn" onClick={saveGame} type="button">
+            <button className="primaryBtn" type="button" onClick={() => setShowSaveConfirm(true)}>
               Save Game
             </button>
           </div>
@@ -893,616 +777,305 @@ export default function GameTracker() {
           <div className="microHint">Tip: Use Save to lock in games for season stats.</div>
         </div>
 
-        {/* RIGHT: Player log */}
+        {/* RIGHT: Player Log */}
         <div className="card">
           <div className="cardHeader">
             <div>
               <div className="cardTitle">Player Log</div>
-              <div className="cardHint">{season.games} games</div>
+              <div className="cardHint">{seasonGamesCount} games</div>
             </div>
           </div>
 
-          <div className="field" style={{ marginTop: 6 }}>
+          {/* Team Logs (organizational + unlimited) */}
+          <div className="formGrid" style={{ marginBottom: 10 }}>
+            <div className="field">
+              <div className="label">TEAM LOG</div>
+              <select className="select" value={selectedTeamLogId} onChange={(e) => setSelectedTeamLogId(e.target.value)}>
+                {teamLogs.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <div className="label">CREATE TEAM LOG</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input className="input" value={newTeamLogName} onChange={(e) => setNewTeamLogName(e.target.value)} placeholder="ex: School Team" />
+                <button className="ghostBtn" type="button" onClick={addTeamLog}>
+                  Add
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="field">
             <div className="label">SELECT PLAYER</div>
             <select className="select" value={selectedPlayer} onChange={(e) => setSelectedPlayer(e.target.value)}>
-              {playerNames.length === 0 ? (
-                <option value="">No players yet</option>
-              ) : (
-                playerNames.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))
-              )}
+              <option value="">{playersForTeamLog.length ? "Select a player" : "No players yet"}</option>
+              {playersForTeamLog.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
             </select>
           </div>
 
-          <div className="sectionHeader">Season-to-date</div>
+          <div className="sectionLabel">Season-to-date</div>
 
-          <div className="seasonGrid">
-            <div className="seasonChip">
-              <div className="seasonLabel">PPG</div>
-              <div className="seasonValue">{season.ppg.toFixed(1)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">RPG</div>
-              <div className="seasonValue">{season.rpg.toFixed(1)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">APG</div>
-              <div className="seasonValue">{season.apg.toFixed(1)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">FG%</div>
-              <div className="seasonValue">{formatPct(season.fgPct)}</div>
-            </div>
-
-            <div className="seasonChip">
-              <div className="seasonLabel">3P%</div>
-              <div className="seasonValue">{formatPct(season.tpPct)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">FT%</div>
-              <div className="seasonValue">{formatPct(season.ftPct)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">ORB/G</div>
-              <div className="seasonValue">{season.orbg.toFixed(1)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">DRB/G</div>
-              <div className="seasonValue">{season.drbg.toFixed(1)}</div>
-            </div>
+          {/* Season Summary (exact order, 8 rows x 2 columns) */}
+          <div className="statsGrid">
+            {seasonSummaryPairs.flatMap((row, idx) => [
+              <div className="statBox" key={`${idx}-L`}>
+                <div className="statLabel">{row.leftLabel}</div>
+                <div className="statValue">{row.leftValue}</div>
+              </div>,
+              <div className="statBox" key={`${idx}-R`}>
+                <div className="statLabel">{row.rightLabel}</div>
+                <div className="statValue">{row.rightValue}</div>
+              </div>,
+            ])}
           </div>
 
-          <div className="microHint" style={{ marginTop: 10 }}>
-            Tip: Save each game to update averages automatically.
-          </div>
+          <div className="microHint">Tip: Stats + games list filter by selected Team Log + selected player.</div>
 
-          <div className="sectionHeader" style={{ marginTop: 16 }}>
-            Games
-          </div>
+          <div className="sectionLabel">Games</div>
 
-          {gamesForSelected.length === 0 ? (
-            <div className="emptyBox">No games saved for this player yet.</div>
+          {gamesForSelection.length === 0 ? (
+            <div className="microHint">No games saved for this player yet.</div>
           ) : (
             <div className="gamesList">
-              {gamesForSelected.map((g) => {
-                const fgm = g.counts.made2 + g.counts.made3;
-                const fga = g.counts.made2 + g.counts.miss2 + g.counts.made3 + g.counts.miss3;
-                const tpm = g.counts.made3;
-                const tpa = g.counts.made3 + g.counts.miss3;
-                const ftm = g.counts.madeFT;
-                const fta = g.counts.madeFT + g.counts.missFT;
-                const pts = g.counts.made2 * 2 + g.counts.made3 * 3 + g.counts.madeFT;
+              {gamesForSelection.map((g) => {
+                const c = g.counts;
+                const gPts = c.made2 * 2 + c.made3 * 3 + c.ftm;
+                const gFgM = c.made2 + c.made3;
+                const gFgA = gFgM + c.miss2 + c.miss3;
+                const g3A = c.made3 + c.miss3;
+                const gReb = c.orb + c.drb;
 
                 return (
-                  <div key={g.id} className="gameCard">
+                  <div className="gameCard" key={g.id}>
                     <div className="gameTop">
-                      <div className="gameTitle">
-                        {g.playerName} • {g.date}
+                      <div>
+                        <div className="gameTitle">
+                          {g.playerName} • {g.date}
+                        </div>
+                        <div className="gameMeta">
+                          PTS {gPts} • FG {gFgM}-{gFgA} • 3P {c.made3}-{g3A} • FT {c.ftm}-{c.fta}
+                        </div>
                       </div>
-                      <button className="miniBtn" onClick={() => deleteGame(g.id)} type="button">
+
+                      <button className="dangerBtn" type="button" onClick={() => requestDeleteGame(g.id)}>
                         Delete
                       </button>
                     </div>
-                    <div className="gameMeta">
-                      {g.opponent ? `vs ${g.opponent} • ` : ""}
-                      PTS {pts} • FG {fgm}-{fga} • 3P {tpm}-{tpa} • FT {ftm}-{fta}
-                    </div>
 
-                    <div className="miniGrid">
-                      <div className="miniChip">
-                        <div className="miniLabel">REB</div>
-                        <div className="miniValue">{g.counts.orb + g.counts.drb}</div>
+                    <div className="gameMiniRow">
+                      <div className="gameMini">
+                        <div className="gameMiniLabel">REB</div>
+                        <div className="gameMiniValue">{gReb}</div>
                       </div>
-                      <div className="miniChip">
-                        <div className="miniLabel">AST</div>
-                        <div className="miniValue">{g.counts.ast}</div>
+                      <div className="gameMini">
+                        <div className="gameMiniLabel">AST</div>
+                        <div className="gameMiniValue">{c.ast}</div>
                       </div>
-                      <div className="miniChip">
-                        <div className="miniLabel">STL</div>
-                        <div className="miniValue">{g.counts.stl}</div>
+                      <div className="gameMini">
+                        <div className="gameMiniLabel">STL</div>
+                        <div className="gameMiniValue">{c.stl}</div>
                       </div>
-                      <div className="miniChip">
-                        <div className="miniLabel">FOUL</div>
-                        <div className="miniValue">{g.counts.pf}</div>
+                      <div className="gameMini">
+                        <div className="gameMiniLabel">FOUL</div>
+                        <div className="gameMiniValue">{c.pf}</div>
                       </div>
                     </div>
 
-                    {g.notes ? <div className="gameNotes">{g.notes}</div> : null}
+                    {g.notes ? <div className="microHint">{g.notes}</div> : null}
                   </div>
                 );
               })}
             </div>
           )}
 
-          <div className="microHint" style={{ marginTop: 12 }}>
-            Saved games are stored locally on this device.
-          </div>
+          <div className="microHint">Saved games are stored locally on this device.</div>
         </div>
       </div>
 
-      <style>{`
-        :root{
-          --bg:#f6f6f4;
-          --card:#ffffff;
-          --ink:#0b0b0b;
-          --muted:rgba(0,0,0,.55);
-          --line:rgba(0,0,0,.12);
-          --shadow:0 10px 25px rgba(0,0,0,.06);
-          --radius:18px;
-
-          /* Fly-ish tones */
-          --good:#0b6b66;     /* deep teal */
-          --bad:#d0482e;      /* fly red/orange */
-          --neutral:#7ea6bf;  /* cool blue */
-        }
-
-        .page{
-          padding: 28px 18px 40px;
-          background: var(--bg);
-          min-height: 100vh;
-          color: var(--ink);
-          font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-        }
-
-        .topBar{
-          max-width: 1120px;
-          margin: 0 auto 18px;
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:16px;
-        }
-
-        .kicker{
-          letter-spacing: .18em;
-          font-size: 11px;
-          color: var(--muted);
-          text-transform: uppercase;
-          margin-bottom: 6px;
-        }
-
-        .title{
-          margin: 0;
-          font-size: 34px;
-          line-height: 1.08;
-        }
-
-        .subtitle{
-          margin-top: 8px;
-          color: var(--muted);
-          font-size: 14px;
-        }
-
-        .topActions{
-          display:flex;
-          gap:10px;
-          flex-wrap: wrap;
-          justify-content:flex-end;
-          align-items: center;
-        }
-
-        .ghostBtn{
-          border: 1px solid var(--line);
-          background: #fff;
-          border-radius: 999px;
-          padding: 10px 14px;
-          font-weight: 600;
-          cursor: pointer;
-          position: relative;
-        }
-        .ghostBtn:disabled{
-          opacity:.45;
-          cursor:not-allowed;
-        }
-
-        .pill{
-          display:inline-block;
-          margin-left: 8px;
-          border: 1px solid var(--line);
-          background: rgba(255,255,255,.9);
-          padding: 3px 8px;
-          border-radius: 999px;
-          font-size: 12px;
-          font-weight: 800;
-        }
-
-        .grid{
-          max-width: 1120px;
-          margin: 0 auto;
-          display:grid;
-          grid-template-columns: 1.1fr .9fr;
-          gap: 18px;
-          align-items:start;
-        }
-
-        @media (max-width: 980px){
-          .grid{ grid-template-columns: 1fr; }
-        }
-
-        .card{
-          background: var(--card);
-          border: 1px solid var(--line);
-          border-radius: var(--radius);
-          box-shadow: var(--shadow);
-          padding: 18px;
-        }
-
-        .cardHeader{
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:12px;
-          margin-bottom: 10px;
-        }
-
-        .cardTitle{
-          font-weight: 800;
-          font-size: 16px;
-        }
-
-        .cardHint{
-          color: var(--muted);
-          font-size: 12px;
-          margin-top: 2px;
-        }
-
-        .primaryBtn{
-          background: var(--ink);
-          color: #fff;
-          border: 0;
-          border-radius: 999px;
-          padding: 10px 14px;
-          font-weight: 700;
-          cursor: pointer;
-        }
-
-        .formGrid{
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-top: 10px;
-        }
-
-        @media (max-width: 520px){
-          .formGrid{ grid-template-columns: 1fr; }
-        }
-
-        .field .label{
-          font-size: 11px;
-          letter-spacing: .14em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
-          margin-bottom: 6px;
-        }
-
-        .req{ color: var(--bad); font-weight: 800; }
-
-        .input, .select, .textarea{
-          width:100%;
-          border: 1px solid var(--line);
-          border-radius: 12px;
-          padding: 12px 12px;
-          font-size: 14px;
-          outline: none;
-          background: #fff;
-        }
-
-        .textarea{ resize: vertical; }
-
-        /* --- STAT TILES (two horizontal rows, 7 across) --- */
-        .statTilesWrap { margin-top: 14px; }
-
-        .statTilesRow {
-          display: grid !important;
-          grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
-          gap: 10px;
-          align-items: stretch;
-        }
-
-        .statTilesRow2 { margin-top: 10px; }
-
-        .statTilesRow > * {
-          width: auto !important;
-          min-width: 0 !important;
-        }
-
-        @media (max-width: 900px) {
-          .statTilesRow { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
-        }
-
-        @media (max-width: 520px) {
-          .statTilesRow { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-        }
-
-        .chip{
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          padding: 10px 10px;
-          background: #fff;
-          min-height: 54px;
-          display:flex;
-          flex-direction:column;
-          justify-content:center;
-        }
-
-        .chipLabel{
-          font-size: 10px;
-          letter-spacing: .12em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
-          white-space: nowrap;
-        }
-
-        .chipValue{
-          margin-top: 2px;
-          font-size: 18px;
-          font-weight: 800;
-          white-space: nowrap;
-        }
-
-        .sectionLabel{
-          margin-top: 14px;
-          font-size: 11px;
-          letter-spacing: .14em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
-        }
-
-        .btnGrid2{
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-top: 10px;
-        }
-
-        .btnGrid3{
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-top: 10px;
-        }
-
-        /* Mobile tap optimizations */
-        .tapBtn, .ghostBtn, .primaryBtn, .miniBtn, .modalBtn, .modalBtnSecondary{
-          touch-action: manipulation;
-        }
-
-        .tapBtn{
-          user-select: none;
-          -webkit-user-select: none;
-          -webkit-tap-highlight-color: transparent;
-        }
-
-        .saveRow{
-          margin-top: 12px;
-          display:flex;
-          justify-content:flex-end;
-        }
-
-        .tapBtn{
-          border: 0;
-          border-radius: 18px;
-          padding: 16px 16px;
-          cursor: pointer;
-          color: #fff;
-          text-align:left;
-          min-height: 84px;
-
-          transition: transform 80ms ease, filter 120ms ease;
-          box-shadow: 0 10px 20px rgba(0,0,0,.10);
-        }
-
-        .tapBtnTitle{
-          font-size: 22px;
-          font-weight: 900;
-          letter-spacing: .02em;
-        }
-
-        .tapBtnSub{
-          margin-top: 6px;
-          font-size: 13px;
-          opacity: .92;
-        }
-
-        .tapBtnGood{ background: var(--good); }
-        .tapBtnBad{ background: var(--bad); }
-        .tapBtnNeutral{ background: var(--neutral); }
-
-        .tapBtnActive{
-          filter: brightness(1.15);
-          transform: scale(0.98);
-        }
-
-        .microHint{
-          margin-top: 12px;
-          font-size: 12px;
-          color: rgba(0,0,0,.55);
-        }
-
-        .sectionHeader{
-          margin-top: 14px;
-          font-weight: 900;
-          font-size: 14px;
-        }
-
-        .seasonGrid{
-          margin-top: 10px;
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
-        }
-
-        .seasonChip{
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          padding: 12px;
-          background: #fff;
-        }
-
-        .seasonLabel{
-          font-size: 10px;
-          letter-spacing: .12em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
-        }
-
-        .seasonValue{
-          margin-top: 4px;
-          font-size: 20px;
-          font-weight: 900;
-        }
-
-        .emptyBox{
-          margin-top: 10px;
-          border: 1px dashed var(--line);
-          border-radius: 14px;
-          padding: 14px;
-          color: rgba(0,0,0,.55);
-          background: rgba(255,255,255,.65);
-        }
-
-        .gamesList{ margin-top: 10px; display:flex; flex-direction:column; gap: 10px; }
-
-        .gameCard{
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          padding: 12px;
-          background: #fff;
-        }
-
-        .gameTop{
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap: 10px;
-        }
-
-        .gameTitle{ font-weight: 900; }
-
-        .miniBtn{
-          border: 1px solid var(--line);
-          background: #fff;
-          border-radius: 999px;
-          padding: 8px 12px;
-          font-weight: 800;
-          cursor: pointer;
-        }
-
-        .gameMeta{
-          margin-top: 4px;
-          color: rgba(0,0,0,.6);
-          font-size: 12px;
-        }
-
-        .miniGrid{
-          margin-top: 10px;
-          display:grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 8px;
-        }
-
-        .miniChip{
-          border: 1px solid var(--line);
-          border-radius: 12px;
-          padding: 10px;
-          background: #fff;
-        }
-        .miniLabel{
-          font-size: 10px;
-          letter-spacing: .12em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
-        }
-        .miniValue{
-          margin-top: 2px;
-          font-weight: 900;
-          font-size: 16px;
-        }
-
-        .gameNotes{
-          margin-top: 10px;
-          font-size: 12px;
-          color: rgba(0,0,0,.65);
-          border-top: 1px solid var(--line);
-          padding-top: 10px;
-        }
-
-        /* Share modal */
-        .modalOverlay{
-          position: fixed;
-          inset: 0;
-          background: rgba(0,0,0,.25);
-          display:flex;
-          align-items: center;
-          justify-content: center;
-          padding: 16px;
-          z-index: 50;
-        }
-
-        .modal{
-          width: 100%;
-          max-width: 420px;
-          background: #fff;
-          border: 1px solid var(--line);
-          border-radius: 18px;
-          box-shadow: 0 20px 50px rgba(0,0,0,.18);
-          padding: 16px;
-        }
-
-        .modalTitle{
-          font-weight: 900;
-          font-size: 16px;
-        }
-
-        .modalHint{
-          margin-top: 4px;
-          color: var(--muted);
-          font-size: 12px;
-        }
-
-        .modalButtons{
-          margin-top: 14px;
-          display:flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-
-        .modalBtn{
-          width: 100%;
-          border: 0;
-          border-radius: 14px;
-          padding: 12px 14px;
-          background: var(--ink);
-          color: #fff;
-          font-weight: 800;
-          cursor: pointer;
-        }
-
-        .modalBtn:disabled{
-          opacity: .5;
-          cursor: not-allowed;
-        }
-
-        .modalBtnSecondary{
-          width: 100%;
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          padding: 12px 14px;
-          background: #fff;
-          color: var(--ink);
-          font-weight: 800;
-          cursor: pointer;
-        }
-
-        .modalMicro{
-          margin-top: 12px;
-          font-size: 12px;
-          color: rgba(0,0,0,.55);
-        }
-      `}</style>
+      {/* ---------------- Modals ---------------- */}
+
+      {/* Save Confirm */}
+      {showSaveConfirm ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h2>Save &amp; Reset?</h2>
+            <p>Saving this game will add it to the Player Log and reset the live tracker to 0. Continue?</p>
+
+            <button className="primaryBtn" type="button" onClick={confirmSaveGame}>
+              Save Game
+            </button>
+            <button className="ghostBtn" type="button" onClick={() => setShowSaveConfirm(false)}>
+              Cancel
+            </button>
+
+            <div className="microHint">Tip: Use Save when the game is finished (or when you want to lock in a partial).</div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Delete Confirm */}
+      {pendingDeleteId ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h2>Delete game?</h2>
+            <p>This will permanently remove this saved game from this device.</p>
+
+            <button className="primaryBtn" type="button" onClick={confirmDeleteGame}>
+              Delete
+            </button>
+            <button className="ghostBtn" type="button" onClick={() => setPendingDeleteId(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Reset Confirm */}
+      {showResetConfirm ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h2>Reset live tracker?</h2>
+            <p>This will reset the live counts back to 0. Continue?</p>
+
+            <button
+              className="primaryBtn"
+              type="button"
+              onClick={() => {
+                setShowResetConfirm(false);
+                resetLive();
+              }}
+            >
+              Reset
+            </button>
+            <button className="ghostBtn" type="button" onClick={() => setShowResetConfirm(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Undo Confirm */}
+      {showUndoConfirm ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h2>Undo last save?</h2>
+            <p>This will remove your most recently saved game from this device.</p>
+
+            <button
+              className="primaryBtn"
+              type="button"
+              onClick={() => {
+                setShowUndoConfirm(false);
+                undoLastSave();
+              }}
+              disabled={!lastSavedEntry}
+            >
+              Undo
+            </button>
+            <button className="ghostBtn" type="button" onClick={() => setShowUndoConfirm(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Upgrade / Paywall modal */}
+      {showUpgrade ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h2>Unlock Saving</h2>
+            <p>
+              You&apos;ve used your {TRIAL_FREE_GAMES} free game saves. Upgrade to continue saving games and viewing season stats.
+            </p>
+
+            <button className="primaryBtn" type="button" onClick={() => startCheckout("single_game")}>
+              Add This Game ($6.99)
+            </button>
+
+            <button
+              className="primaryBtn"
+              type="button"
+              onClick={() => {
+                setShowUpgrade(false);
+                setShowSeasonPick(true);
+              }}
+            >
+              Season Pass
+            </button>
+
+            <button className="ghostBtn" type="button" onClick={() => setShowUpgrade(false)}>
+              Not now
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Season pick (required) */}
+      {showSeasonPick ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h2>Select Season Window</h2>
+            <p>Choose Fall/Winter/Spring/Summer. This will be attached to your Season Pass purchase.</p>
+
+            <div className="field" style={{ marginTop: 8 }}>
+              <div className="label">SEASON</div>
+              <select className="select" value={seasonPick} onChange={(e) => setSeasonPick(e.target.value as any)}>
+                <option value="">Select…</option>
+                <option value="Fall">{getSeasonWindow("Fall").label}</option>
+                <option value="Winter">{getSeasonWindow("Winter").label}</option>
+                <option value="Spring">{getSeasonWindow("Spring").label}</option>
+                <option value="Summer">{getSeasonWindow("Summer").label}</option>
+              </select>
+            </div>
+
+            {seasonPick ? (
+              <div className="microHint">
+                Access window: {getSeasonWindow(seasonPick).start} → {getSeasonWindow(seasonPick).end}
+              </div>
+            ) : null}
+
+            <button
+              className="primaryBtn"
+              type="button"
+              disabled={!seasonPick}
+              onClick={() => {
+                if (!seasonPick) return;
+                const w = getSeasonWindow(seasonPick);
+                startCheckout("season", {
+                  seasonKey: w.key,
+                  seasonLabel: w.label,
+                  accessStart: w.start,
+                  accessEnd: w.end,
+                  // Team Logs are organizational; still helpful to attach current context
+                  teamLogIdAtPurchase: selectedTeamLogId || null,
+                });
+              }}
+            >
+              Continue to Checkout
+            </button>
+
+            <button
+              className="ghostBtn"
+              type="button"
+              onClick={() => {
+                setShowSeasonPick(false);
+                setSeasonPick("");
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
