@@ -125,42 +125,60 @@ function sumCounts(games: GameEntry[]): Counts {
 }
 
 function getSeasonWindow(key: SeasonWindowKey, now = new Date()) {
-  // Windows:
-  // Fall: Aug 1 - Oct 31
-  // Winter: Nov 1 - Jan 31 (spans year)
-  // Spring: Feb 1 - Apr 30
-  // Summer: May 1 - Jul 31
-  const y = now.getFullYear();
-  const m = now.getMonth() + 1;
-
-  let startY = y;
-  let endY = y;
-  let start = "";
-  let end = "";
-  let label = "";
-
-  if (key === "Fall") {
-    start = `${y}-08-01`;
-    end = `${y}-10-31`;
-    label = `Fall ${y}`;
-  } else if (key === "Winter") {
-    startY = m === 1 ? y - 1 : y;
-    endY = startY + 1;
-    start = `${startY}-11-01`;
-    end = `${endY}-01-31`;
-    label = `Winter ${startY}-${endY}`;
-  } else if (key === "Spring") {
-    start = `${y}-02-01`;
-    end = `${y}-04-30`;
-    label = `Spring ${y}`;
-  } else {
-    start = `${y}-05-01`;
-    end = `${y}-07-31`;
-    label = `Summer ${y}`;
+    const y = now.getFullYear();
+    const m = now.getMonth(); // 0 = Jan
+  
+    let start = "";
+    let end = "";
+    let label = "";
+  
+    if (key === "Fall") {
+      start = `${y}-09-01`;
+      end = `${y}-11-30`;
+      label = `Fall ${y} (Sep 1–Nov 30)`;
+    } 
+    else if (key === "Winter") {
+      // If Jan/Feb, winter started LAST year
+      const winterStartYear = m <= 1 ? y - 1 : y;
+      const winterEndYear = winterStartYear + 1;
+  
+      start = `${winterStartYear}-11-01`;
+      end = `${winterEndYear}-02-28`;
+      label = `Winter ${winterStartYear}-${winterEndYear} (Nov 1–Feb 28)`;
+    } 
+    else if (key === "Spring") {
+      start = `${y}-03-01`;
+      end = `${y}-05-31`;
+      label = `Spring ${y} (Mar 1–May 31)`;
+    } 
+    else {
+      // Summer
+      start = `${y}-06-01`;
+      end = `${y}-08-31`;
+      label = `Summer ${y} (Jun 1–Aug 31)`;
+    }
+  
+    return { key, label, start, end };
   }
-
-  return { key, label, start, end };
-}
+  function getCurrentSeasonKey(now = new Date()): SeasonWindowKey {
+    const m = now.getMonth(); // 0=Jan ... 11=Dec
+  
+    // Winter = Nov 1 – Feb 28
+    if (m === 10 || m === 11 || m === 0 || m === 1) return "Winter";
+    // Spring = Mar 1 – May 31
+    if (m >= 2 && m <= 4) return "Spring";
+    // Summer = Jun 1 – Aug 31
+    if (m >= 5 && m <= 7) return "Summer";
+    // Fall = Sep 1 – Nov 30 (Sep/Oct here; Nov handled above as Winter)
+    return "Fall";
+  }
+  
+  function getSeasonOrderStartingNow(now = new Date()): SeasonWindowKey[] {
+    const order: SeasonWindowKey[] = ["Winter", "Spring", "Summer", "Fall"];
+    const current = getCurrentSeasonKey(now);
+    const idx = order.indexOf(current);
+    return [...order.slice(idx), ...order.slice(0, idx)];
+  }    
 
 /** ---------------- Component ---------------- */
 export default function GameTracker() {
@@ -211,7 +229,9 @@ export default function GameTracker() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showUndoConfirm, setShowUndoConfirm] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-
+  const [showShareConfirm, setShowShareConfirm] = useState(false);
+  const [pendingShareAfterSave, setPendingShareAfterSave] = useState<null | "latest">(null);
+  
   // ----- Paywall + Season pick -----
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [showSeasonPick, setShowSeasonPick] = useState(false);
@@ -420,7 +440,19 @@ export default function GameTracker() {
     if (ent.plan !== "free") return true;
     return ent.singleCreditsUsed < TRIAL_FREE_GAMES;
   };
-
+  const getLatestSavedEntryForSelection = () => {
+    if (!selectedTeamLogId || !selectedPlayer) return null;
+  
+    const filtered = games.filter(
+      (g) => g.teamLogId === selectedTeamLogId && g.playerName === selectedPlayer
+    );
+  
+    if (!filtered.length) return null;
+  
+    // Prefer createdAt if present; fallback to date string
+    return [...filtered].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
+  };
+  
   /** ---------------- Checkout ---------------- */
   function startCheckout(plan: "single_game" | "season", meta?: Record<string, any>) {
     fetch("/api/checkout", {
@@ -533,7 +565,157 @@ export default function GameTracker() {
     setGames((g) => g.filter((x) => x.id !== id));
     setLastSavedEntry(null);
   };
-
+  const shareMenu = () => {
+    setShowShareConfirm(true);
+  };  
+  
+  const shareLatestGame = async () => {
+    // Safety: must have team + player selected
+    if (!selectedTeamLogId || !selectedPlayer) {
+      alert("Select a Team and Player first.");
+      return;
+    }
+  
+    const latest = getLatestSavedEntryForSelection();
+  
+    // Safety: must be saved
+    if (!latest) {
+        const goSave = confirm("Only saved games can be shared. Save now?");
+        if (goSave) setShowSaveConfirm(true); // opens your existing Save modal
+        return;
+      }      
+  
+    const lines: string[] = [];
+    lines.push("Fly Stat Tracker — Latest Game");
+    lines.push(`Team: ${latest.team}`);
+    lines.push(`Player: ${latest.playerName}`);
+    lines.push(`Date: ${latest.date}`);
+    lines.push(`Opponent: ${latest.opponent || "-"}`);
+    lines.push("");
+  
+    const c = latest.counts;
+    lines.push(
+      `PTS ${c.made2 * 2 + c.made3 * 3 + c.ftm} | FG ${c.made2 + c.made3}-${c.miss2 + c.miss3 + c.made2 + c.made3} | 3P ${c.made3}-${c.miss3 + c.made3} | FT ${c.ftm}-${c.fta}`
+    );
+    lines.push(
+      `REB ${c.orb + c.drb} (O ${c.orb} / D ${c.drb}) | AST ${c.ast} | STL ${c.stl} | TO ${c.to}`
+    );
+    lines.push("");
+    lines.push("Generated by Fly Stat Tracker");
+  
+    const text = lines.join("\n");
+  
+    try {
+      // Mobile-first
+      // @ts-ignore
+      if (navigator.share) {
+        // @ts-ignore
+        await navigator.share({
+          title: "Fly Stat Tracker — Latest Game",
+          text,
+        });
+      } else {
+        await navigator.clipboard.writeText(text);
+        alert("Copied to clipboard.");
+      }
+    } catch {
+      // user cancelled share sheet — do nothing
+    }
+  };  
+  
+  const shareSeason = async () => {
+    // SAFETY: season sharing requires saved games too
+    const latest = getLatestSavedEntryForSelection();
+    if (!latest) {
+        const goSave = confirm("Only saved games can be shared. Save now?");
+        if (goSave) setShowSaveConfirm(true); // opens existing Save modal
+        return;
+      }      
+  
+    // Gather all games for current selection (team + player)
+    if (!selectedTeamLogId || !selectedPlayer) {
+      alert("Select a Team and Player first.");
+      return;
+    }
+  
+    const seasonKey = seasonPick || getCurrentSeasonKey(); // if seasonPick required, this still works
+    const window = getSeasonWindow(seasonKey);
+  
+    // Filter games for this team/player AND inside the chosen season window
+    const startMs = new Date(window.start + "T00:00:00").getTime();
+    const endMs = new Date(window.end + "T23:59:59").getTime();
+  
+    const seasonGames = games.filter((g) => {
+      if (g.teamLogId !== selectedTeamLogId) return false;
+      if (g.playerName !== selectedPlayer) return false;
+  
+      // Prefer createdAt; fallback to date string
+      const t = typeof g.createdAt === "number"
+        ? g.createdAt
+        : new Date(g.date + "T12:00:00").getTime();
+  
+      return t >= startMs && t <= endMs;
+    });
+  
+    if (!seasonGames.length) {
+      alert("No saved games found for this player/team in that season window.");
+      return;
+    }
+  
+    // Sum counts
+    const totals = sumCounts(seasonGames);
+  
+    const pts = totals.made2 * 2 + totals.made3 * 3 + totals.ftm;
+    const fgm = totals.made2 + totals.made3;
+    const fga = totals.made2 + totals.made3 + totals.miss2 + totals.miss3;
+    const fgPct = fga ? (fgm / fga) * 100 : 0;
+  
+    const tpm = totals.made3;
+    const tpa = totals.made3 + totals.miss3;
+    const tpPct = tpa ? (tpm / tpa) * 100 : 0;
+  
+    const ftm = totals.ftm;
+    const fta = totals.fta;
+    const ftPct = fta ? (ftm / fta) * 100 : 0;
+  
+    const reb = totals.orb + totals.drb;
+    const n = seasonGames.length;
+  
+    const lines: string[] = [];
+    lines.push("Fly Stat Tracker — Season Summary");
+    lines.push(`Team: ${latest.team}`);
+    lines.push(`Player: ${selectedPlayer}`);
+    lines.push(`Season: ${window.label}`);
+    lines.push(`Games: ${n}`);
+    lines.push("");
+  
+    lines.push(`PTS: ${pts} | PPG: ${(pts / n).toFixed(1)}`);
+    lines.push(`FG: ${fgm}-${fga} | FG%: ${fgPct.toFixed(1)}%`);
+    lines.push(`3P: ${tpm}-${tpa} | 3P%: ${tpPct.toFixed(1)}%`);
+    lines.push(`FT: ${ftm}-${fta} | FT%: ${ftPct.toFixed(1)}%`);
+    lines.push(`REB: ${reb} (O ${totals.orb} / D ${totals.drb}) | RPG: ${(reb / n).toFixed(1)}`);
+    lines.push(`AST: ${totals.ast} | APG: ${(totals.ast / n).toFixed(1)}`);
+    lines.push(`STL: ${totals.stl} | SPG: ${(totals.stl / n).toFixed(1)}`);
+    lines.push(`TO: ${totals.to} | TO/G: ${(totals.to / n).toFixed(1)}`);
+    lines.push("");
+    lines.push("Generated by Fly Stat Tracker");
+  
+    const text = lines.join("\n");
+  
+    try {
+      // @ts-ignore
+      if (navigator.share) {
+        // @ts-ignore
+        await navigator.share({ title: "Fly Stat Tracker — Season Summary", text });
+      } else {
+        await navigator.clipboard.writeText(text);
+        alert("Copied to clipboard.");
+      }
+    } catch {
+      // user cancelled share sheet; do nothing
+    }
+  };  
+  
   const requestDeleteGame = (id: string) => setPendingDeleteId(id);
 
   const confirmDeleteGame = () => {
@@ -567,14 +749,30 @@ export default function GameTracker() {
         </div>
 
         <div className="topActions">
-          <button className="ghostBtn" type="button" onClick={() => setShowUndoConfirm(true)} disabled={!lastSavedEntry}>
-            Undo
-          </button>
-          <button className="ghostBtn" type="button" onClick={() => setShowResetConfirm(true)}>
-            Reset
-          </button>
-          {/* If you have Share already elsewhere, keep it. Leaving out here to preserve your current layout. */}
-        </div>
+  <button
+    className="ghostBtn"
+    type="button"
+    onClick={() => setShowUndoConfirm(true)}
+    disabled={!lastSavedEntry}
+  >
+    Undo
+  </button>
+
+  <button 
+  className="ghostBtn" 
+  onClick={shareMenu}
+  >
+  Share
+</button>
+
+  <button
+    className="ghostBtn"
+    type="button"
+    onClick={() => setShowResetConfirm(true)}
+  >
+    Reset
+  </button>
+</div>
       </div>
 
       <div className="mainGrid">
@@ -938,6 +1136,45 @@ export default function GameTracker() {
           </div>
         </div>
       ) : null}
+{showShareConfirm && (
+  <div className="modalOverlay" onClick={() => setShowShareConfirm(false)}>
+    <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modalTitle">What would you like to share?</div>
+
+      <div className="modalActions" style={{ display: "grid", gap: 10 }}>
+        <button
+          className="primaryBtn"
+          type="button"
+          onClick={() => {
+            setShowShareConfirm(false);
+            shareLatestGame();
+          }}
+        >
+          Share Latest Game
+        </button>
+
+        <button
+          className="primaryBtn"
+          type="button"
+          onClick={() => {
+            setShowShareConfirm(false);
+            shareSeason();
+          }}
+        >
+          Share Season Summary
+        </button>
+
+        <button
+          className="ghostBtn"
+          type="button"
+          onClick={() => setShowShareConfirm(false)}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
       {/* Reset Confirm */}
       {showResetConfirm ? (
@@ -1009,10 +1246,11 @@ export default function GameTracker() {
                 setShowSeasonPick(true);
               }}
             >
-              Season Pass
+              Season Pass ($19.99)
             </button>
 
             <button className="ghostBtn" type="button" onClick={() => setShowUpgrade(false)}>
+              
               Not now
             </button>
           </div>
@@ -1030,10 +1268,12 @@ export default function GameTracker() {
               <div className="label">SEASON</div>
               <select className="select" value={seasonPick} onChange={(e) => setSeasonPick(e.target.value as any)}>
                 <option value="">Select…</option>
-                <option value="Fall">{getSeasonWindow("Fall").label}</option>
-                <option value="Winter">{getSeasonWindow("Winter").label}</option>
-                <option value="Spring">{getSeasonWindow("Spring").label}</option>
-                <option value="Summer">{getSeasonWindow("Summer").label}</option>
+                {getSeasonOrderStartingNow().map((k) => (
+  <option key={k} value={k}>
+    {getSeasonWindow(k).label}
+  </option>
+))}
+
               </select>
             </div>
 
