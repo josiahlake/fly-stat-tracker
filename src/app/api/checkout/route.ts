@@ -5,20 +5,14 @@ export const runtime = "nodejs";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
-type Plan = "single_game" | "season" | "unlimited_monthly" | "unlimited_annual";
+type Plan = "single_game" | "season";
 
 function getPriceId(plan: Plan) {
   switch (plan) {
     case "single_game":
-      return process.env.STRIPE_PRICE_SINGLE_GAME!;
+      return process.env.STRIPE_PRICE_SINGLE_GAME || "";
     case "season":
-      return process.env.STRIPE_PRICE_SEASON_PASS!;
-    case "unlimited_monthly":
-      return process.env.STRIPE_PRICE_UNLIMITED_MONTHLY!;
-    case "unlimited_annual":
-      return process.env.STRIPE_PRICE_UNLIMITED_ANNUAL!;
-    default:
-      throw new Error("Invalid plan");
+      return process.env.STRIPE_PRICE_SEASON_PASS || "";
   }
 }
 
@@ -28,15 +22,17 @@ export async function POST(req: Request) {
 
     const priceId = getPriceId(plan);
 
-    const isSubscription = plan === "unlimited_monthly" || plan === "unlimited_annual";
-    const mode: Stripe.Checkout.SessionCreateParams.Mode = isSubscription
-      ? "subscription"
-      : "payment";
+    if (!priceId) {
+      return NextResponse.json(
+        { error: `Missing Stripe price env var for plan: ${plan}` },
+        { status: 400 }
+      );
+    }
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
     const session = await stripe.checkout.sessions.create({
-      mode,
+      mode: "payment",
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${appUrl}/upgrade/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/upgrade/cancel`,
@@ -46,6 +42,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
     console.error("Checkout error:", err?.message || err);
-    return NextResponse.json({ error: "Checkout failed" }, { status: 500 });
+    return NextResponse.json({ error: err?.message || "Checkout failed" }, { status: 500 });
   }
 }

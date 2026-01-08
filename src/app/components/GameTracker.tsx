@@ -88,7 +88,14 @@ function formatAvg(total: number, games: number) {
   if (games <= 0) return "0.0";
   return (total / games).toFixed(1);
 }
-
+function formatDateUS(iso: string) {
+    // iso expected: "YYYY-MM-DD"
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-");
+    if (!y || !m || !d) return iso;
+    return `${m}/${d}/${y}`;
+  }
+  
 function sumCounts(games: GameEntry[]): Counts {
   return games.reduce(
     (acc, g) => {
@@ -461,15 +468,24 @@ export default function GameTracker() {
       body: JSON.stringify({ plan, meta }),
     })
       .then(async (r) => {
-        if (!r.ok) throw new Error("Checkout failed");
-        return r.json();
+        const data = await r.json().catch(() => ({}));
+  
+        if (!r.ok) {
+          // show the real backend error (MUCH easier to debug)
+          const msg = data?.error || "Checkout failed";
+          throw new Error(msg);
+        }
+  
+        return data;
       })
       .then((data) => {
         if (data?.url) window.location.href = data.url;
-        else alert("Checkout error. Please try again.");
+        else throw new Error("Checkout URL missing from server response");
       })
-      .catch(() => alert("Checkout error. Please try again."));
-  }
+      .catch((err) => {
+        alert(err?.message || "Checkout error for ${plan}. Please try again.");
+      });
+  }  
 
   /** ---------------- Tap feedback ---------------- */
   const flashTap = () => {
@@ -589,7 +605,7 @@ export default function GameTracker() {
     lines.push("Fly Stat Tracker — Latest Game");
     lines.push(`Team: ${latest.team}`);
     lines.push(`Player: ${latest.playerName}`);
-    lines.push(`Date: ${latest.date}`);
+    lines.push(`Date: ${formatDateUS(latest.date)}`);
     lines.push(`Opponent: ${latest.opponent || "-"}`);
     lines.push("");
   
@@ -793,6 +809,10 @@ export default function GameTracker() {
               <div className="label">DATE</div>
               <input className="input" value={date} onChange={(e) => setDate(e.target.value)} type="date" />
             </div>
+           
+            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
+  {formatDateUS(date)}
+</div>
 
             <div className="field">
               <div className="label">TEAM</div>
