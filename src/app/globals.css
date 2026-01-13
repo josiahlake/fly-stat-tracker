@@ -490,3 +490,258 @@ select {
   text-overflow: clip;
   white-space: nowrap;
 }
+/* ---------------- Mock-up layout styles ---------------- */
+.mockHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mockHeaderRight {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.mockSaveBtn {
+  background: #0f0f10;
+  color: #fff;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+}
+
+.mockForm {
+  display: grid;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.mockTwoCol {
+  display: grid;
+  grid-template-columns: 1fr 140px;
+  gap: 12px;
+}
+
+@media (max-width: 520px) {
+  .mockTwoCol {
+    grid-template-columns: 1fr 120px;
+  }
+}
+
+.mockInputCenter {
+  text-align: center;
+  font-weight: 700;
+}
+
+.mockDateEcho {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: -6px;
+}
+
+.mockSectionLabel {
+  margin-top: 14px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  opacity: 0.6;
+}
+
+/* SCORING top row: wide PTS + 2 pills */
+.mockScoringTop {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+  align-items: stretch;
+}
+
+.mockPill {
+  border-radius: 999px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 2px solid rgba(0, 0, 0, 0.08);
+  min-height: 60px;
+}
+
+.mockPillDark {
+  background: #4a4a4d;
+  border-color: transparent;
+  color: #fff;
+}
+
+.mockPillLight {
+  background: #fff;
+  color: #2a2a2a;
+}
+
+.mockPillPts {
+  align-items: center;
+  text-align: center;
+}
+
+.mockPillLabel {
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.75;
+  margin-bottom: 2px;
+}
+
+.mockPillDark .mockPillLabel {
+  opacity: 0.9;
+}
+
+.mockPillValue {
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+/* 3-wide action button rows */
+.mockBtnRow3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.mockActionBtn {
+  border: 0;
+  border-radius: 16px;
+  padding: 12px 10px;
+  min-height: 86px;
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.10);
+}
+
+.mockActionBtnGreen {
+  background: #2fa84f;
+}
+
+.mockActionBtnRed {
+  background: #b4232a;
+}
+
+.mockBtnTop {
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.95;
+  margin-bottom: 6px;
+}
+
+.mockBtnBig {
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+/* bottom scoring pills (4 across) */
+.mockScoringBottom {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+@media (max-width: 520px) {
+  .mockScoringBottom {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Hustle grid: 2 columns with value box right */
+.mockHustleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.mockHustleBtn {
+  background: #e8e8ea;
+  border: 2px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  padding: 12px;
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+.mockHustleLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mockHustleTop {
+  font-weight: 900;
+  font-size: 18px;
+  color: #6a6a6d;
+}
+
+.mockHustleSub {
+  font-size: 12px;
+  font-weight: 700;
+  color: #8a8a8e;
+}
+
+.mockHustleVal {
+  background: #fff;
+  border-radius: 12px;
+  min-width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 900;
+  color: #2a2a2a;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+/* Bottom Save: stays under NOTES, pinned to bottom of the Live Tracker card area (not floating over page) */
+.mockBottomSave {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+
+  /* creates a clean "footer" feel inside the card */
+  background: #fff;
+  padding-bottom: 8px;
+}
+
+.mockSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+
+.mockUndoBtn {
+  background: #fff;
+  color: #111;
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.mockUndoBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
