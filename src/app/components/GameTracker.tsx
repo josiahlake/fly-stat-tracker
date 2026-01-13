@@ -250,6 +250,7 @@ export default function GameTracker() {
     const tapTimeoutRef = useRef<number | null>(null);
   const [keepAwake, setKeepAwake] = useState(true);
   const wakeLockRef = useRef<any>(null);
+  const [purchaseMsg, setPurchaseMsg] = useState<string | null>(null);
 
   // ----- Games / logs -----
   const [games, setGames] = useState<GameEntry[]>([]);
@@ -265,7 +266,8 @@ export default function GameTracker() {
     creditsRemaining: 0,
     freeSavesUsed: 0,
     updatedAt: Date.now(),
-  });  
+    singleCreditsUsed: 0,
+  });   
 
   // ----- Form fields -----
   const [date, setDate] = useState<string>(todayISO());
@@ -356,7 +358,7 @@ const [showFinishConfirm, setShowFinishConfirm] = useState(false);
         setCounts(progress.counts);
       }
       
-    const rawEnt = safeParse<any>(
+      const rawEnt = safeParse<any>(
         typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_ENT) : null,
         null
       );
@@ -364,21 +366,24 @@ const [showFinishConfirm, setShowFinishConfirm] = useState(false);
       // Migration: old -> new
       const loadedEnt: Entitlements = (() => {
         if (!rawEnt) {
-            return {
-              plan: "free",
-              creditsRemaining: 0,
-              freeSavesUsed: 0,
-              updatedAt: Date.now(),
-              singleCreditsUsed: 0, // <-- add this
-            };
-          }          
+          return {
+            plan: "free",
+            creditsRemaining: 0,
+            freeSavesUsed: 0,
+            updatedAt: Date.now(),
+            singleCreditsUsed: 0,
+          };
+        }
       
         // If already new shape
-        if (typeof rawEnt?.creditsRemaining === "number" && typeof rawEnt?.freeSavesUsed === "number") {
-            return {
-                ...rawEnt,
-                singleCreditsUsed: Number((rawEnt as any)?.singleCreditsUsed ?? 0),
-              } as Entitlements;              
+        if (
+          typeof rawEnt?.creditsRemaining === "number" &&
+          typeof rawEnt?.freeSavesUsed === "number"
+        ) {
+          return {
+            ...rawEnt,
+            singleCreditsUsed: Number((rawEnt as any).singleCreditsUsed ?? 0),
+          } as Entitlements;
         }
       
         // Old shape fallback
@@ -387,50 +392,57 @@ const [showFinishConfirm, setShowFinishConfirm] = useState(false);
       
         // If they had "season" before, treat as annual (simplest)
         if (oldPlan === "season") {
-            return {
-              plan: "annual",
-              creditsRemaining: 0,
-              freeSavesUsed: oldUsed,
-              updatedAt: Date.now(),
-              singleCreditsUsed: oldUsed, // add this
-            };
-          }          
-      
           return {
-            plan: "free",
+            plan: "annual",
             creditsRemaining: 0,
             freeSavesUsed: oldUsed,
             updatedAt: Date.now(),
-            singleCreditsUsed: oldUsed, // add this
-          };          
-      })();      
-
-    const loadedLogs = safeParse<TeamLog[]>(
-      typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_TEAMLOGS) : null,
-      []
-    );
-
-    setGames(Array.isArray(loadedGames) ? loadedGames : []);
-    setEnt(loadedEnt);
-
-    let logs = Array.isArray(loadedLogs) ? loadedLogs : [];
-    if (logs.length === 0) {
-      const defaultLog: TeamLog = { id: makeId(), name: "Fly Academy", createdAt: Date.now() };
-      logs = [defaultLog];
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STORAGE_KEY_TEAMLOGS, JSON.stringify(logs));
+            singleCreditsUsed: oldUsed,
+          };
+        }
+      
+        return {
+          plan: "free",
+          creditsRemaining: 0,
+          freeSavesUsed: oldUsed,
+          updatedAt: Date.now(),
+          singleCreditsUsed: oldUsed,
+        };
+      })();
+      
+      const loadedLogs = safeParse<TeamLog[]>(
+        typeof window !== "undefined"
+          ? localStorage.getItem(STORAGE_KEY_TEAMLOGS)
+          : null,
+        []
+      );
+      
+      setGames(Array.isArray(loadedGames) ? loadedGames : []);
+      setEnt(loadedEnt);
+      
+      let logs = Array.isArray(loadedLogs) ? loadedLogs : [];
+      if (logs.length === 0) {
+        const defaultLog: TeamLog = { id: makeId(), name: "Fly Academy", createdAt: Date.now() };
+        logs = [defaultLog];
+        if (typeof window !== "undefined") {
+          localStorage.setItem(STORAGE_KEY_TEAMLOGS, JSON.stringify(logs));
+        }
       }
-    }
-    setTeamLogs(logs);
-
-    const defaultLogId = logs[0]?.id || "";
-    setSelectedTeamLogId(defaultLogId);
-
-    const players = Array.from(
-      new Set((Array.isArray(loadedGames) ? loadedGames : []).filter((g) => g.teamLogId === defaultLogId).map((g) => g.playerName))
-    ).sort();
-    setSelectedPlayer(players[0] || "");
-  }, []);
+      setTeamLogs(logs);
+      
+      const defaultLogId = logs[0]?.id || "";
+      setSelectedTeamLogId(defaultLogId);
+      
+      const players = Array.from(
+        new Set(
+          (Array.isArray(loadedGames) ? loadedGames : [])
+            .filter((g) => g.teamLogId === defaultLogId)
+            .map((g) => g.playerName)
+        )
+      ).sort();
+      
+      setSelectedPlayer(players[0] || "");      
+    }, []);
 
   /** ---------------- Persist ---------------- */
   useEffect(() => {
@@ -960,11 +972,20 @@ async function startCheckout(plan: Plan) {
   return (
     <div className="page">
       <div className="topbar">
-        <div>
-          <div className="eyebrow">PREPARE FOR TAKEOFF</div>
-          <h1 className="title">FLY STAT TRACKER</h1>
-          <div className="subtitle">Track your Player&apos;s stats for a game or for a season.</div>
-        </div>
+
+      <div>
+  <div className="eyebrow">PREPARE FOR TAKEOFF</div>
+  <h1 className="title">FLY STAT TRACKER</h1>
+  <div className="subtitle">Track your Player&apos;s stats for a game or for a season.</div>
+
+  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+    {ent.plan === "annual"
+      ? "Plan: Unlimited"
+      : ent.plan === "credits"
+      ? `Credits remaining: ${ent.creditsRemaining}`
+      : `Free saves used: ${ent.freeSavesUsed} / ${TRIAL_FREE_GAMES}`}
+  </div>
+</div>
 
         <div className="topActions">
           <button className="ghostBtn" type="button" onClick={() => setShowUndoConfirm(true)} disabled={undoStack.length === 0}>
@@ -1296,6 +1317,7 @@ async function startCheckout(plan: Plan) {
                 const gReb = c.orb + c.drb;
 
                 return (
+                    
                   <div className="gameCard" key={g.id}>
                     <div className="gameTop">
                       <div>
