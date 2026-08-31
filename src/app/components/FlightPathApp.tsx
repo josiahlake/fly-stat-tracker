@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import FlightPathAuth from "./FlightPathAuth";
 import FlightPathPlayerSetup from "./FlightPathPlayerSetup";
+import FlightPathPlayerHome from "./FlightPathPlayerHome";
 import { supabase } from "../lib/supabase";
 
 type AppState = "loading" | "signed-out" | "needs-player" | "has-player";
 
 export default function FlightPathApp() {
   const [appState, setAppState] = useState<AppState>("loading");
-
+const [playerId, setPlayerId] = useState<string | null>(null);
   async function checkAccount() {
     const {
       data: { user },
@@ -32,7 +33,13 @@ export default function FlightPathApp() {
       return;
     }
 
-    setAppState(access && access.length > 0 ? "has-player" : "needs-player");
+if (access && access.length > 0) {
+  setPlayerId(access[0].player_id);
+  setAppState("has-player");
+} else {
+  setPlayerId(null);
+  setAppState("needs-player");
+}
   }
 
   useEffect(() => {
@@ -80,46 +87,18 @@ export default function FlightPathApp() {
 
   if (appState === "needs-player") {
     return (
-      <FlightPathPlayerSetup
-        onPlayerCreated={() => setAppState("has-player")}
-      />
+<FlightPathPlayerSetup
+  onPlayerCreated={(createdPlayerId) => {
+    setPlayerId(createdPlayerId);
+    setAppState("has-player");
+  }}
+/>
     );
   }
 
-  return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#050505",
-        color: "#ffffff",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "30px",
-        fontFamily: "Arial, Helvetica, sans-serif",
-      }}
-    >
-      <div style={{ textAlign: "center" }}>
-        <div
-          style={{
-            fontSize: "11px",
-            letterSpacing: "0.24em",
-            color: "#777777",
-            fontWeight: 800,
-            marginBottom: "12px",
-          }}
-        >
-          FLIGHT PATH
-        </div>
+if (appState === "has-player" && playerId) {
+  return <FlightPathPlayerHome playerId={playerId} />;
+}
 
-        <h1 style={{ margin: "0 0 10px", fontSize: "32px" }}>
-          Player connected.
-        </h1>
-
-        <p style={{ color: "#999999", margin: 0 }}>
-          Your player's Flight Path is ready.
-        </p>
-      </div>
-    </main>
-  );
+return null;
 }
