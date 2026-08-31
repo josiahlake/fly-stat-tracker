@@ -5,7 +5,11 @@ import { supabase } from "../lib/supabase";
 
 type AuthMode = "signin" | "signup";
 
-export default function FlightPathAuth() {
+type Props = {
+  onSignedIn?: () => void;
+};
+
+export default function FlightPathAuth({ onSignedIn }: Props) {
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -44,7 +48,8 @@ export default function FlightPathAuth() {
 
         if (signInError) throw signInError;
 
-        setMessage("You're signed in.");
+setMessage("You're signed in.");
+onSignedIn?.();
       }
     } catch (err) {
       setError(
