@@ -1,5 +1,5 @@
-import GameTracker from "./components/GameTracker";
+import FlightPathAuth from "./components/FlightPathAuth";
 
 export default function Page() {
-  return <GameTracker />;
+  return <FlightPathAuth />;
 }
