@@ -16,9 +16,13 @@ type PlayerHomeData = {
 
 type Props = {
   playerId: string;
+  onStartGame?: () => void;
 };
 
-export default function FlightPathPlayerHome({ playerId }: Props) {
+export default function FlightPathPlayerHome({
+  playerId,
+  onStartGame,
+}: Props) {
   const [data, setData] = useState<PlayerHomeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -293,9 +297,10 @@ export default function FlightPathPlayerHome({ playerId }: Props) {
             {gamesRemaining === 1 ? "free game remaining" : "free games remaining"}
           </div>
 
-          <button
-            type="button"
-            style={{
+         <button
+  type="button"
+  onClick={onStartGame}
+  style={{
               width: "100%",
               border: "none",
               borderRadius: "14px",
