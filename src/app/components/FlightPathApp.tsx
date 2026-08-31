@@ -4,19 +4,27 @@ import { useEffect, useState } from "react";
 import FlightPathAuth from "./FlightPathAuth";
 import FlightPathPlayerSetup from "./FlightPathPlayerSetup";
 import FlightPathPlayerHome from "./FlightPathPlayerHome";
+import GameTracker from "./GameTracker";
 import { supabase } from "../lib/supabase";
 
-type AppState = "loading" | "signed-out" | "needs-player" | "has-player";
+type AppState =
+  | "loading"
+  | "signed-out"
+  | "needs-player"
+  | "has-player"
+  | "tracking-game";
 
 export default function FlightPathApp() {
   const [appState, setAppState] = useState<AppState>("loading");
-const [playerId, setPlayerId] = useState<string | null>(null);
+  const [playerId, setPlayerId] = useState<string | null>(null);
+
   async function checkAccount() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
+      setPlayerId(null);
       setAppState("signed-out");
       return;
     }
@@ -29,17 +37,18 @@ const [playerId, setPlayerId] = useState<string | null>(null);
 
     if (error) {
       console.error(error);
+      setPlayerId(null);
       setAppState("needs-player");
       return;
     }
 
-if (access && access.length > 0) {
-  setPlayerId(access[0].player_id);
-  setAppState("has-player");
-} else {
-  setPlayerId(null);
-  setAppState("needs-player");
-}
+    if (access && access.length > 0) {
+      setPlayerId(access[0].player_id);
+      setAppState("has-player");
+    } else {
+      setPlayerId(null);
+      setAppState("needs-player");
+    }
   }
 
   useEffect(() => {
@@ -51,7 +60,9 @@ if (access && access.length > 0) {
       checkAccount();
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   if (appState === "loading") {
@@ -87,18 +98,27 @@ if (access && access.length > 0) {
 
   if (appState === "needs-player") {
     return (
-<FlightPathPlayerSetup
-  onPlayerCreated={(createdPlayerId) => {
-    setPlayerId(createdPlayerId);
-    setAppState("has-player");
-  }}
-/>
+      <FlightPathPlayerSetup
+        onPlayerCreated={(createdPlayerId) => {
+          setPlayerId(createdPlayerId);
+          setAppState("has-player");
+        }}
+      />
     );
   }
 
-if (appState === "has-player" && playerId) {
-  return <FlightPathPlayerHome playerId={playerId} />;
-}
+  if (appState === "has-player" && playerId) {
+    return (
+      <FlightPathPlayerHome
+        playerId={playerId}
+        onStartGame={() => setAppState("tracking-game")}
+      />
+    );
+  }
 
-return null;
+  if (appState === "tracking-game" && playerId) {
+    return <GameTracker />;
+  }
+
+  return null;
 }
