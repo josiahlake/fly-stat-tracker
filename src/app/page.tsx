@@ -1,5 +1,5 @@
-import FlightPathAuth from "./components/FlightPathAuth";
+import FlightPathApp from "./components/FlightPathApp";
 
 export default function Page() {
-  return <FlightPathAuth />;
+  return <FlightPathApp />;
 }
