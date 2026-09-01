@@ -149,6 +149,7 @@ function TapButton({
 type GameTrackerProps = {
   playerId: string;
   onGameSaved?: () => void;
+  onExitGame?: () => void;
 };
 
 type GameDraft = {
@@ -161,6 +162,7 @@ type GameDraft = {
 export default function GameTracker({
   playerId,
   onGameSaved,
+  onExitGame,
 }: GameTrackerProps) {
   const [games, setGames] = useState<GameEntry[]>([]);
   const [counts, setCounts] = useState<LiveCounts>({ ...emptyCounts });
