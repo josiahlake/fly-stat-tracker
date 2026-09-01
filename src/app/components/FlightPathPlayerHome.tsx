@@ -31,6 +31,29 @@ type LiveGameDraft = {
   freeThrowsAttempted: number;
 };
 
+type CompletedGame = {
+  id: string;
+  gameDate: string;
+  opponentName: string;
+  flyScore: number | null;
+  opponentScore: number | null;
+  result: string | null;
+  points: number;
+  rebounds: number;
+  assists: number;
+  steals: number;
+  turnovers: number;
+  blocks: number;
+  fouls: number;
+  playingSeconds: number;
+  fieldGoalsMade: number;
+  fieldGoalsAttempted: number;
+  threePointersMade: number;
+  threePointersAttempted: number;
+  freeThrowsMade: number;
+  freeThrowsAttempted: number;
+};
+
 type Props = {
   playerId: string;
   onStartGame?: () => void;
@@ -51,6 +74,28 @@ function levelClass(level: string) {
 
 function initials(firstName: string, lastName: string) {
   return `${firstName?.[0] ?? ""}${lastName?.[0] ?? ""}`.toUpperCase();
+}
+
+function formatGameDate(value: string) {
+  if (!value) return "";
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return value;
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  }).toUpperCase();
+}
+
+function pct(made: number, attempts: number) {
+  if (!attempts) return 0;
+  return (made / attempts) * 100;
+}
+
+function formatPlayingTime(totalSeconds: number) {
+  const safe = Math.max(0, Math.floor(totalSeconds || 0));
+  const minutes = Math.floor(safe / 60);
+  const seconds = safe % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function Stat({ label, value }: { label: string; value: string | number }) {
@@ -108,6 +153,7 @@ function NavItem({
 export default function FlightPathPlayerHome({ playerId, onStartGame }: Props) {
   const [data, setData] = useState<PlayerHomeData | null>(null);
   const [liveGame, setLiveGame] = useState<LiveGameDraft | null>(null);
+  const [completedGames, setCompletedGames] = useState<CompletedGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -182,7 +228,94 @@ export default function FlightPathPlayerHome({ playerId, onStartGame }: Props) {
           .maybeSingle();
 
         if (draftError) throw draftError;
+
+        const { data: games, error: gamesError } = await supabase
+          .from("flight_games")
+          .select(`
+            id,
+            game_date,
+            opponent_name,
+            fly_score,
+            opponent_score,
+            result,
+            created_at
+          `)
+          .eq("player_id", playerId)
+          .order("game_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        if (gamesError) throw gamesError;
+
+        let mergedGames: CompletedGame[] = [];
+
+        if (games && games.length > 0) {
+          const gameIds = games.map((game) => game.id);
+
+          const { data: stats, error: statsError } = await supabase
+            .from("flight_game_stats")
+            .select(`
+              game_id,
+              two_pt_made,
+              two_pt_missed,
+              three_pt_made,
+              three_pt_missed,
+              ft_made,
+              ft_missed,
+              rebounds,
+              assists,
+              steals,
+              turnovers,
+              blocks,
+              fouls,
+              playing_seconds
+            `)
+            .in("game_id", gameIds);
+
+          if (statsError) throw statsError;
+
+          const statsByGame = new Map(
+            (stats ?? []).map((stat) => [stat.game_id, stat])
+          );
+
+          mergedGames = games.map((game) => {
+            const stat = statsByGame.get(game.id) as any;
+            const twoMade = stat?.two_pt_made ?? 0;
+            const twoMissed = stat?.two_pt_missed ?? 0;
+            const threeMade = stat?.three_pt_made ?? 0;
+            const threeMissed = stat?.three_pt_missed ?? 0;
+            const ftMade = stat?.ft_made ?? 0;
+            const ftMissed = stat?.ft_missed ?? 0;
+            const fgMade = twoMade + threeMade;
+            const fgAttempts = fgMade + twoMissed + threeMissed;
+
+            return {
+              id: game.id,
+              gameDate: game.game_date ?? "",
+              opponentName: game.opponent_name || "Opponent",
+              flyScore: game.fly_score ?? null,
+              opponentScore: game.opponent_score ?? null,
+              result: game.result ?? null,
+              points: twoMade * 2 + threeMade * 3 + ftMade,
+              rebounds: stat?.rebounds ?? 0,
+              assists: stat?.assists ?? 0,
+              steals: stat?.steals ?? 0,
+              turnovers: stat?.turnovers ?? 0,
+              blocks: stat?.blocks ?? 0,
+              fouls: stat?.fouls ?? 0,
+              playingSeconds: stat?.playing_seconds ?? 0,
+              fieldGoalsMade: fgMade,
+              fieldGoalsAttempted: fgAttempts,
+              threePointersMade: threeMade,
+              threePointersAttempted: threeMade + threeMissed,
+              freeThrowsMade: ftMade,
+              freeThrowsAttempted: ftMade + ftMissed,
+            };
+          });
+        }
+
         if (cancelled) return;
+        setCompletedGames(mergedGames);
 
         if (draft) {
           const fgMade = (draft.two_pt_made ?? 0) + (draft.three_pt_made ?? 0);
@@ -252,6 +385,41 @@ export default function FlightPathPlayerHome({ playerId, onStartGame }: Props) {
     () => Math.max((data?.gamesTotal ?? 0) - (data?.gamesUsed ?? 0), 0),
     [data]
   );
+
+  const season = useMemo(() => {
+    const games = completedGames.length;
+    const totals = completedGames.reduce(
+      (acc, game) => {
+        acc.points += game.points;
+        acc.rebounds += game.rebounds;
+        acc.assists += game.assists;
+        acc.steals += game.steals;
+        acc.fgm += game.fieldGoalsMade;
+        acc.fga += game.fieldGoalsAttempted;
+        return acc;
+      },
+      { points: 0, rebounds: 0, assists: 0, steals: 0, fgm: 0, fga: 0 }
+    );
+
+    return {
+      games,
+      ppg: games ? totals.points / games : 0,
+      rpg: games ? totals.rebounds / games : 0,
+      apg: games ? totals.assists / games : 0,
+      spg: games ? totals.steals / games : 0,
+      fgPct: pct(totals.fgm, totals.fga),
+    };
+  }, [completedGames]);
+
+  const lastFive = useMemo(() => completedGames.slice(0, 5), [completedGames]);
+
+  const lastFivePpg = useMemo(() => {
+    if (!lastFive.length) return 0;
+    return lastFive.reduce((sum, game) => sum + game.points, 0) / lastFive.length;
+  }, [lastFive]);
+
+  const lastFiveDelta = lastFive.length ? lastFivePpg - season.ppg : 0;
+  const lastGame = completedGames[0] ?? null;
 
   if (loading) {
     return (
@@ -359,38 +527,81 @@ export default function FlightPathPlayerHome({ playerId, onStartGame }: Props) {
         <section className="sectionCard">
           <div className="sectionHeader">
             <span>SEASON STATS</span>
-            <span className="sectionMeta">{data.seasonName ?? "CURRENT"}</span>
+            <span className="sectionMeta">{season.games} {season.games === 1 ? "GAME" : "GAMES"}</span>
           </div>
           <div className="seasonGrid">
-            <SeasonStat value="—" label="PPG" />
-            <SeasonStat value="—" label="RPG" />
-            <SeasonStat value="—" label="APG" />
-            <SeasonStat value="—" label="STL" />
-            <SeasonStat value="—" label="FG%" />
+            <SeasonStat value={season.ppg.toFixed(1)} label="PPG" />
+            <SeasonStat value={season.rpg.toFixed(1)} label="RPG" />
+            <SeasonStat value={season.apg.toFixed(1)} label="APG" />
+            <SeasonStat value={season.spg.toFixed(1)} label="STL" />
+            <SeasonStat value={`${season.fgPct.toFixed(0)}%`} label="FG%" />
           </div>
-          <div className="dataPending">Season stats will populate from completed games.</div>
         </section>
 
         <section className="sectionCard">
-          <div className="sectionHeader"><span>LAST 5 GAMES</span></div>
-          <div className="trendEmpty">
-            <div>
-              <div className="trendValue">—</div>
-              <div className="trendLabel">PPG</div>
-            </div>
-            <div className="trendGraphic" aria-hidden="true">
-              <span /><span /><span /><span /><span />
-            </div>
-            <div className="trendCompare">
-              <strong>—</strong>
-              <span>VS SEASON</span>
-            </div>
+          <div className="sectionHeader">
+            <span>LAST 5 GAMES</span>
+            <span className="sectionMeta">{lastFive.length ? `${lastFive.length} PLAYED` : "NO GAMES"}</span>
           </div>
+          {lastFive.length ? (
+            <div className="trendLive">
+              <div>
+                <div className="trendValue">{lastFivePpg.toFixed(1)}</div>
+                <div className="trendLabel">PPG</div>
+              </div>
+              <div className="sparkline" aria-label="Points in last five games">
+                {lastFive.slice().reverse().map((game, index) => {
+                  const max = Math.max(...lastFive.map((item) => item.points), 1);
+                  const height = 14 + (game.points / max) * 32;
+                  return (
+                    <span key={game.id} style={{ height: `${height}px` }}>
+                      <i>{game.points}</i>
+                    </span>
+                  );
+                })}
+              </div>
+              <div className={`trendCompare ${lastFiveDelta >= 0 ? "up" : "down"}`}>
+                <strong>{lastFiveDelta >= 0 ? "+" : ""}{lastFiveDelta.toFixed(1)}</strong>
+                <span>VS SEASON</span>
+              </div>
+            </div>
+          ) : (
+            <div className="emptyGame">Your last-five trend will appear after completed games.</div>
+          )}
         </section>
 
         <section className="sectionCard">
           <div className="sectionHeader"><span>LAST GAME</span></div>
-          <div className="emptyGame">Complete your first game to begin building your Flight Path.</div>
+          {lastGame ? (
+            <div className="lastGameCard">
+              <div className="lastGameTop">
+                <div>
+                  <div className="lastOpponent">vs. {lastGame.opponentName}</div>
+                  <div className="lastDate">{formatGameDate(lastGame.gameDate)}</div>
+                </div>
+                <div className={`resultBadge ${(lastGame.result || "").toLowerCase()}`}>
+                  {lastGame.result ?? "—"}
+                  {lastGame.flyScore !== null && lastGame.opponentScore !== null ? (
+                    <span>{lastGame.flyScore}-{lastGame.opponentScore}</span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="lastStats">
+                <Stat label="PTS" value={lastGame.points} />
+                <Stat label="REB" value={lastGame.rebounds} />
+                <Stat label="AST" value={lastGame.assists} />
+                <Stat label="STL" value={lastGame.steals} />
+              </div>
+              <div className="lastGameMeta">
+                FG {lastGame.fieldGoalsMade}-{lastGame.fieldGoalsAttempted}
+                <span>•</span> 3PT {lastGame.threePointersMade}-{lastGame.threePointersAttempted}
+                <span>•</span> FT {lastGame.freeThrowsMade}-{lastGame.freeThrowsAttempted}
+                {lastGame.playingSeconds > 0 ? <><span>•</span> {formatPlayingTime(lastGame.playingSeconds)} MIN</> : null}
+              </div>
+            </div>
+          ) : (
+            <div className="emptyGame">Complete your first game to begin building your Flight Path.</div>
+          )}
         </section>
 
         <section className="pathCard">
@@ -464,8 +675,9 @@ const styles = `${stateStyles}
   .sectionHeader{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px;color:#e9e9eb;font-size:10px;font-weight:950;letter-spacing:.12em}.sectionMeta{color:#77777d;font-size:9px}
   .seasonGrid{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid #242429;border-bottom:1px solid #242429}.seasonStat{text-align:left;padding:13px 8px;border-right:1px solid #242429}.seasonStat:last-child{border-right:0}.seasonValue{font-size:21px;font-weight:950}.seasonLabel{margin-top:4px;color:#88888e;font-size:9px;font-weight:800;letter-spacing:.05em}.dataPending{padding-top:10px;color:#68686e;font-size:10px;line-height:1.45}
 
-  .trendEmpty{display:grid;grid-template-columns:auto 1fr auto;align-items:end;gap:12px}.trendValue{font-size:30px;font-weight:950}.trendLabel{color:#8d8d93;font-size:9px;font-weight:800;letter-spacing:.08em}.trendGraphic{height:42px;display:flex;align-items:flex-end;gap:4px;padding-bottom:5px}.trendGraphic span{display:block;width:16%;height:2px;background:#6f2da5;box-shadow:0 0 8px rgba(150,65,220,.4)}.trendGraphic span:nth-child(2){transform:translateY(-5px)}.trendGraphic span:nth-child(3){transform:translateY(-3px)}.trendGraphic span:nth-child(4){transform:translateY(-10px)}.trendGraphic span:nth-child(5){transform:translateY(-16px)}.trendCompare{text-align:right}.trendCompare strong{display:block;color:#9e45e8;font-size:18px}.trendCompare span{display:block;color:#77777d;font-size:8px;font-weight:800;letter-spacing:.08em;margin-top:4px}
+  .trendLive{display:grid;grid-template-columns:auto 1fr auto;align-items:end;gap:12px}.trendValue{font-size:30px;font-weight:950}.trendLabel{color:#8d8d93;font-size:9px;font-weight:800;letter-spacing:.08em}.sparkline{height:55px;display:flex;align-items:flex-end;justify-content:center;gap:5px;padding:0 3px 2px}.sparkline span{position:relative;display:block;width:16%;min-width:8px;max-width:18px;border-radius:4px 4px 1px 1px;background:linear-gradient(180deg,#a34eea,#5b1f86);box-shadow:0 0 10px rgba(150,65,220,.22)}.sparkline i{position:absolute;top:-13px;left:50%;transform:translateX(-50%);color:#85858b;font-size:7px;font-style:normal;font-weight:800}.trendCompare{text-align:right}.trendCompare strong{display:block;color:#9e45e8;font-size:18px}.trendCompare.up strong{color:#48d76c}.trendCompare.down strong{color:#ff6262}.trendCompare span{display:block;color:#77777d;font-size:8px;font-weight:800;letter-spacing:.08em;margin-top:4px}
   .emptyGame{border:1px dashed #2d2d32;border-radius:10px;padding:17px;color:#7f7f85;font-size:12px;line-height:1.5}
+  .lastGameCard{border:1px solid #29292e;border-radius:11px;background:#080809;padding:12px}.lastGameTop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.lastOpponent{font-size:18px;font-weight:950}.lastDate{margin-top:4px;color:#77777d;font-size:9px;font-weight:800;letter-spacing:.08em}.resultBadge{min-width:58px;border:1px solid #3b3b40;border-radius:9px;padding:7px 8px;text-align:center;color:#fff;font-size:18px;font-weight:950}.resultBadge span{display:block;margin-top:3px;color:#b9b9be;font-size:8px;font-weight:800}.resultBadge.w{border-color:#19863c;background:rgba(0,180,58,.12);color:#30e566}.resultBadge.l{border-color:#8b2424;background:rgba(210,20,20,.10);color:#ff5f5f}.resultBadge.t{border-color:#66666b;color:#d6d6d8}.lastStats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:12px}.lastGameMeta{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px;color:#85858b;font-size:9px;font-weight:700}
 
   .pathLevels{display:grid;grid-template-columns:auto 1fr auto 1fr auto 1fr auto;align-items:center;gap:8px;padding:2px 0 4px}.pathLevel{text-align:center;opacity:.55}.pathLevel.active{opacity:1}.pathIcon{font-size:25px;line-height:1}.pathName{font-size:8px;font-weight:950;letter-spacing:.06em;margin-top:6px}.pathLine{height:1px;background:#38383d}.pathLevel.elevate{color:#d59b21}.pathLevel.ascend{color:#a84df5}.pathLevel.air{color:#00bed0}.pathLevel.select{color:#fff}
 
