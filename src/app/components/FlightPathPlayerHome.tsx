@@ -1,6 +1,6 @@
-import FlightLevelMark from "./FlightLevelMark";
 "use client";
 
+import FlightLevelMark from "./FlightLevelMark";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 
