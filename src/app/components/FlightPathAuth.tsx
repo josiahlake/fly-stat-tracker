@@ -301,12 +301,12 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
             Helvetica,
             sans-serif;
         }
-
-        .fpAuthShell {
-          width: 100%;
-          max-width: 430px;
-          margin: 0 auto;
-        }
+.fpAuthShell {
+  width: 100%;
+  max-width: 430px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
 
         .fpBrand {
           text-align: center;
@@ -356,20 +356,20 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
         .fpTagline span {
           color: #d59b21;
         }
-
-        .fpJourney {
-          display: grid;
-          grid-template-columns:
-            1fr 18px
-            1fr 18px
-            1fr 18px
-            1fr;
-          align-items: center;
-          margin-top: 30px;
-          padding: 19px 2px 18px;
-          border-top: 1px solid #28282c;
-          border-bottom: 1px solid #232327;
-        }
+.fpJourney {
+  width: 100%;
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) 18px
+    minmax(0, 1fr) 18px
+    minmax(0, 1fr) 18px
+    minmax(0, 1fr);
+  align-items: center;
+  margin-top: 30px;
+  padding: 19px 2px 18px;
+  border-top: 1px solid #28282c;
+  border-bottom: 1px solid #232327;
+}
 
         .fpLevel {
           display: flex;
