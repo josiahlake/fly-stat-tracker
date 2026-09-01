@@ -58,6 +58,7 @@ type CompletedGame = {
 type Props = {
   playerId: string;
   onStartGame?: () => void;
+  onOpenLog?: () => void;
 };
 
 function extractLevel(teamName: string | null) {
@@ -151,7 +152,11 @@ function NavItem({
   );
 }
 
-export default function FlightPathPlayerHome({ playerId, onStartGame }: Props) {
+export default function FlightPathPlayerHome({
+  playerId,
+  onStartGame,
+  onOpenLog,
+}: Props) {{
   const [data, setData] = useState<PlayerHomeData | null>(null);
   const [liveGame, setLiveGame] = useState<LiveGameDraft | null>(null);
   const [completedGames, setCompletedGames] = useState<CompletedGame[]>([]);
@@ -645,7 +650,19 @@ export default function FlightPathPlayerHome({ playerId, onStartGame }: Props) {
 
         <nav className="bottomNav">
           <NavItem icon="⌂" label="HOME" active />
-          <NavItem icon="▣" label="LOG" />
+<button
+  type="button"
+  className="navItem"
+  onClick={onOpenLog}
+>
+  <span className="navIcon">
+    ▣
+  </span>
+
+  <span>
+    LOG
+  </span>
+</button>
           <button type="button" className="trackNav" onClick={onStartGame}>
             <span>＋</span><small>TRACK</small>
           </button>
