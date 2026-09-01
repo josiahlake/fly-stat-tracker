@@ -146,11 +146,8 @@ export default function FlightPathPlayerHome({
             (draft.ft_missed ?? 0);
 
           setLiveGame({
-            opponentName:
-              draft.opponent_name || "Opponent",
-
-            gameDate:
-              draft.game_date || "",
+            opponentName: draft.opponent_name || "Opponent",
+            gameDate: draft.game_date || "",
 
             points:
               ((draft.two_pt_made ?? 0) * 2) +
@@ -161,35 +158,19 @@ export default function FlightPathPlayerHome({
               (draft.offensive_rebounds ?? 0) +
               (draft.defensive_rebounds ?? 0),
 
-            assists:
-              draft.assists ?? 0,
+            assists: draft.assists ?? 0,
+            steals: draft.steals ?? 0,
+            turnovers: draft.turnovers ?? 0,
+            fouls: draft.fouls ?? 0,
 
-            steals:
-              draft.steals ?? 0,
+            fieldGoalsMade: fgMade,
+            fieldGoalsAttempted: fgAttempts,
 
-            turnovers:
-              draft.turnovers ?? 0,
+            threePointersMade: threeMade,
+            threePointersAttempted: threeAttempts,
 
-            fouls:
-              draft.fouls ?? 0,
-
-            fieldGoalsMade:
-              fgMade,
-
-            fieldGoalsAttempted:
-              fgAttempts,
-
-            threePointersMade:
-              threeMade,
-
-            threePointersAttempted:
-              threeAttempts,
-
-            freeThrowsMade:
-              ftMade,
-
-            freeThrowsAttempted:
-              ftAttempts,
+            freeThrowsMade: ftMade,
+            freeThrowsAttempted: ftAttempts,
           });
         } else {
           setLiveGame(null);
@@ -197,12 +178,8 @@ export default function FlightPathPlayerHome({
 
         setData({
           playerId: player.id,
-
-          firstName:
-            player.first_name,
-
-          lastName:
-            player.last_name,
+          firstName: player.first_name,
+          lastName: player.last_name,
 
           jerseyNumber:
             membership?.jersey_number ?? null,
@@ -243,52 +220,23 @@ export default function FlightPathPlayerHome({
 
   if (loading) {
     return (
-      <main
-        style={{
-          minHeight: "100vh",
-          background: "#050505",
-          color: "#ffffff",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "Arial, Helvetica, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            fontSize: "11px",
-            letterSpacing: "0.24em",
-            color: "#777777",
-            fontWeight: 800,
-          }}
-        >
-          LOADING PLAYER...
-        </div>
+      <main className="fpStatePage">
+        <div className="fpLoading">LOADING FLIGHT PATH...</div>
+
+        <style>{stateStyles}</style>
       </main>
     );
   }
 
   if (error || !data) {
     return (
-      <main
-        style={{
-          minHeight: "100vh",
-          background: "#050505",
-          color: "#ffffff",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "24px",
-          fontFamily: "Arial, Helvetica, sans-serif",
-        }}
-      >
-        <div style={{ textAlign: "center" }}>
-          <h2>Unable to load player.</h2>
-
-          <p style={{ color: "#999999" }}>
-            {error}
-          </p>
+      <main className="fpStatePage">
+        <div className="fpErrorState">
+          <strong>Unable to load player.</strong>
+          <span>{error}</span>
         </div>
+
+        <style>{stateStyles}</style>
       </main>
     );
   }
@@ -298,466 +246,484 @@ export default function FlightPathPlayerHome({
     0
   );
 
+  const playerName =
+    `${data.firstName} ${data.lastName}`.trim();
+
+  const jersey =
+    data.jerseyNumber
+      ? `#${data.jerseyNumber}`
+      : "";
+
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#050505",
-        color: "#ffffff",
-        padding: "32px 20px 56px",
-        fontFamily: "Arial, Helvetica, sans-serif",
-      }}
-    >
-      <section
-        style={{
-          width: "100%",
-          maxWidth: "560px",
-          margin: "0 auto",
-        }}
-      >
-        <header
-          style={{
-            marginBottom: "30px",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "10px",
-              letterSpacing: "0.26em",
-              color: "#777777",
-              fontWeight: 800,
-              marginBottom: "10px",
-            }}
-          >
-            THE FLY ACADEMY
+    <main className="homePage">
+      <section className="phoneShell">
+
+        {/* HEADER */}
+
+        <header className="topBar">
+          <div className="brand">
+            <span>FLIGHT PATH</span>
+            <span className="plane">➤</span>
           </div>
 
-          <div
-            style={{
-              fontSize: "32px",
-              fontWeight: 900,
-              letterSpacing: "-0.04em",
-              textTransform: "uppercase",
-              marginBottom: "6px",
-            }}
+          <button
+            className="iconButton"
+            type="button"
+            aria-label="Notifications"
           >
-            Flight Path
-          </div>
-
-          <div
-            style={{
-              color: "#8d8d8d",
-              fontSize: "14px",
-            }}
-          >
-            Track your game. See your journey.
-          </div>
+            ♢
+          </button>
         </header>
 
-        {/* PLAYER */}
-        <div
-          style={{
-            border: "1px solid #292929",
-            borderRadius: "24px",
-            padding: "26px",
-            background: "#0d0d0d",
-            marginBottom: "16px",
-          }}
+        {/* PLAYER IDENTITY */}
+
+        <section className="playerHero">
+          <div className="avatar">
+            <div className="avatarInner">
+              {data.firstName
+                ?.charAt(0)
+                .toUpperCase()}
+              {data.lastName
+                ?.charAt(0)
+                .toUpperCase()}
+            </div>
+          </div>
+
+          <div className="playerIdentity">
+            <div className="playerName">
+              {playerName}
+            </div>
+
+            <div className="playerMeta">
+              {jersey && (
+                <span>{jersey}</span>
+              )}
+
+              {jersey && data.teamName && (
+                <span className="dot">•</span>
+              )}
+
+              {data.teamName && (
+                <span>{data.teamName}</span>
+              )}
+            </div>
+
+            <div className="level">
+              ASCEND
+              <span className="levelMark">⌃</span>
+            </div>
+          </div>
+        </section>
+
+        {/* SEASON */}
+
+        <button
+          className="seasonButton"
+          type="button"
         >
-          <div
-            style={{
-              color: "#777777",
-              fontSize: "10px",
-              letterSpacing: "0.18em",
-              fontWeight: 800,
-              marginBottom: "8px",
-            }}
-          >
-            PLAYER
-          </div>
+          <span>
+            {data.seasonName ??
+              "CURRENT SEASON"}
+          </span>
 
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "30px",
-              lineHeight: 1.05,
-              fontWeight: 900,
-              textTransform: "uppercase",
-            }}
-          >
-            {data.firstName} {data.lastName}
-            {data.jerseyNumber
-              ? ` · #${data.jerseyNumber}`
-              : ""}
-          </h1>
+          <span>⌄</span>
+        </button>
 
-          <div
-            style={{
-              marginTop: "10px",
-              color: "#a0a0a0",
-              fontSize: "14px",
-              lineHeight: 1.5,
-            }}
-          >
-            {data.teamName ?? "No team assigned"}
+        {/* PRIMARY GAME ACTION */}
 
-            {data.seasonName
-              ? ` · ${data.seasonName}`
-              : ""}
-          </div>
-        </div>
-
-        {/* LIVE GAME OR START GAME */}
         {liveGame ? (
-          <div
-            style={{
-              border: "1px solid #343434",
-              borderRadius: "24px",
-              padding: "26px",
-              background: "#101010",
-              marginBottom: "16px",
-            }}
-          >
-            <div
-              style={{
-                color: "#8f8f8f",
-                fontSize: "10px",
-                letterSpacing: "0.18em",
-                fontWeight: 800,
-                marginBottom: "10px",
-              }}
-            >
-              GAME IN PROGRESS
-            </div>
-
-            <div
-              style={{
-                fontSize: "24px",
-                fontWeight: 900,
-                marginBottom: "5px",
-              }}
-            >
-              vs. {liveGame.opponentName}
-            </div>
-
-            <div
-              style={{
-                color: "#888888",
-                fontSize: "13px",
-                marginBottom: "22px",
-              }}
-            >
-              Your live game is automatically saved.
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns:
-                  "repeat(4, 1fr)",
-                gap: "8px",
-                marginBottom: "14px",
-              }}
-            >
-              {[
-                ["PTS", liveGame.points],
-                ["REB", liveGame.rebounds],
-                ["AST", liveGame.assists],
-                ["STL", liveGame.steals],
-              ].map(([label, value]) => (
-                <div
-                  key={label}
-                  style={{
-                    border: "1px solid #292929",
-                    borderRadius: "14px",
-                    padding: "13px 10px",
-                    background: "#0a0a0a",
-                  }}
-                >
-                  <div
-                    style={{
-                      color: "#777777",
-                      fontSize: "8px",
-                      letterSpacing: "0.14em",
-                      fontWeight: 800,
-                      marginBottom: "6px",
-                    }}
-                  >
-                    {label}
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: "20px",
-                      fontWeight: 900,
-                    }}
-                  >
-                    {value}
-                  </div>
+          <section className="liveGameCard">
+            <div className="liveTop">
+              <div>
+                <div className="liveLabel">
+                  <span className="liveDot" />
+                  GAME IN PROGRESS
                 </div>
-              ))}
+
+                <div className="liveOpponent">
+                  vs. {liveGame.opponentName}
+                </div>
+              </div>
+
+              <div className="autoSave">
+                AUTO-SAVED ✓
+              </div>
             </div>
 
-            <div
-              style={{
-                color: "#999999",
-                fontSize: "12px",
-                lineHeight: 1.6,
-                marginBottom: "20px",
-              }}
-            >
+            <div className="liveStats">
+              <Stat
+                label="PTS"
+                value={liveGame.points}
+              />
+
+              <Stat
+                label="REB"
+                value={liveGame.rebounds}
+              />
+
+              <Stat
+                label="AST"
+                value={liveGame.assists}
+              />
+
+              <Stat
+                label="STL"
+                value={liveGame.steals}
+              />
+            </div>
+
+            <div className="shootingLine">
               FG {liveGame.fieldGoalsMade}-
               {liveGame.fieldGoalsAttempted}
-
-              {" · "}
-
+              <span>•</span>
               3PT {liveGame.threePointersMade}-
               {liveGame.threePointersAttempted}
-
-              {" · "}
-
+              <span>•</span>
               FT {liveGame.freeThrowsMade}-
               {liveGame.freeThrowsAttempted}
             </div>
 
             <button
               type="button"
+              className="trackButton resume"
               onClick={onStartGame}
-              style={{
-                width: "100%",
-                border: "none",
-                borderRadius: "14px",
-                padding: "17px",
-                background: "#ffffff",
-                color: "#000000",
-                fontSize: "15px",
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
             >
-              RESUME GAME →
+              RESUME GAME
+              <span>→</span>
             </button>
-          </div>
+          </section>
         ) : (
-          <div
-            style={{
-              border: "1px solid #292929",
-              borderRadius: "24px",
-              padding: "26px",
-              background: "#0d0d0d",
-              marginBottom: "16px",
-            }}
-          >
-            <div
-              style={{
-                color: "#777777",
-                fontSize: "10px",
-                letterSpacing: "0.18em",
-                fontWeight: 800,
-                marginBottom: "8px",
-              }}
-            >
-              YOUR ACCESS
-            </div>
-
-            <div
-              style={{
-                fontSize: "30px",
-                fontWeight: 900,
-                marginBottom: "4px",
-              }}
-            >
-              {gamesRemaining}
-            </div>
-
-            <div
-              style={{
-                color: "#a0a0a0",
-                fontSize: "14px",
-                marginBottom: "22px",
-              }}
-            >
-              {gamesRemaining === 1
-                ? "free game remaining"
-                : "free games remaining"}
-            </div>
-
+          <>
             <button
               type="button"
+              className="trackButton"
               onClick={onStartGame}
-              style={{
-                width: "100%",
-                border: "none",
-                borderRadius: "14px",
-                padding: "17px",
-                background: "#ffffff",
-                color: "#000000",
-                fontSize: "15px",
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
             >
-              START GAME →
+              <span className="plus">＋</span>
+              TRACK A GAME
             </button>
-          </div>
+
+            <div className="accessLine">
+              {gamesRemaining === 1
+                ? "1 GAME REMAINING"
+                : `${gamesRemaining} GAMES REMAINING`}
+            </div>
+          </>
         )}
 
         {/* SEASON STATS */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "10px",
-            marginBottom: "16px",
-          }}
-        >
-          {[
-            ["GAMES", "0"],
-            ["PPG", "0.0"],
-            ["RPG", "0.0"],
-          ].map(([label, value]) => (
-            <div
-              key={label}
-              style={{
-                border: "1px solid #292929",
-                borderRadius: "18px",
-                padding: "18px 14px",
-                background: "#0d0d0d",
-              }}
-            >
-              <div
-                style={{
-                  color: "#777777",
-                  fontSize: "9px",
-                  letterSpacing: "0.15em",
-                  fontWeight: 800,
-                  marginBottom: "8px",
-                }}
-              >
-                {label}
-              </div>
 
-              <div
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 900,
-                }}
-              >
-                {value}
-              </div>
-            </div>
-          ))}
-        </div>
+        <section className="sectionCard">
+          <div className="sectionHeader">
+            <span>SEASON STATS</span>
 
-        {/* RECENT GAMES */}
-        <div
-          style={{
-            border: "1px solid #292929",
-            borderRadius: "24px",
-            padding: "24px",
-            background: "#0d0d0d",
-            marginBottom: "16px",
-          }}
-        >
-          <div
-            style={{
-              color: "#777777",
-              fontSize: "10px",
-              letterSpacing: "0.18em",
-              fontWeight: 800,
-              marginBottom: "12px",
-            }}
-          >
-            RECENT GAMES
+            <span className="sectionMeta">
+              {data.seasonName ?? "CURRENT"}
+            </span>
           </div>
 
-          <div
-            style={{
-              color: "#9a9a9a",
-              fontSize: "14px",
-              lineHeight: 1.5,
-            }}
-          >
-            No games tracked yet.
-          </div>
-        </div>
-
-        {/* FLIGHT PATH */}
-        <div
-          style={{
-            border: "1px solid #292929",
-            borderRadius: "24px",
-            padding: "24px",
-            background: "#0d0d0d",
-          }}
-        >
-          <div
-            style={{
-              color: "#777777",
-              fontSize: "10px",
-              letterSpacing: "0.18em",
-              fontWeight: 800,
-              marginBottom: "14px",
-            }}
-          >
-            YOUR FLIGHT PATH
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              gap: "14px",
-              alignItems: "flex-start",
-            }}
-          >
-            <div
-              style={{
-                width: "10px",
-                height: "10px",
-                borderRadius: "50%",
-                background: "#ffffff",
-                marginTop: "5px",
-                flexShrink: 0,
-              }}
+          <div className="seasonGrid">
+            <SeasonStat
+              value="—"
+              label="PPG"
             />
 
-            <div>
-              <div
-                style={{
-                  fontWeight: 800,
-                  fontSize: "15px",
-                  marginBottom: "3px",
-                }}
-              >
-                {data.seasonName ??
-                  "Current Season"}
-              </div>
+            <SeasonStat
+              value="—"
+              label="RPG"
+            />
 
-              <div
-                style={{
-                  color: "#969696",
-                  fontSize: "14px",
-                }}
-              >
-                {data.teamName ??
-                  "Team not assigned"}
+            <SeasonStat
+              value="—"
+              label="APG"
+            />
+
+            <SeasonStat
+              value="—"
+              label="STL"
+            />
+
+            <SeasonStat
+              value="—"
+              label="FG%"
+            />
+          </div>
+
+          <div className="dataPending">
+            Season stats will populate from
+            completed games.
+          </div>
+        </section>
+
+        {/* LAST 5 */}
+
+        <section className="sectionCard">
+          <div className="sectionHeader">
+            <span>LAST 5 GAMES</span>
+          </div>
+
+          <div className="trendEmpty">
+            <div>
+              <div className="trendValue">—</div>
+              <div className="trendLabel">
+                PPG
               </div>
             </div>
-          </div>
-        </div>
 
-        <div
-          style={{
-            textAlign: "center",
-            marginTop: "24px",
-            color: "#5f5f5f",
-            fontSize: "10px",
-            letterSpacing: "0.08em",
-          }}
-        >
-          PRIVATE BY DEFAULT. SHARED BY CHOICE.
-        </div>
+            <div className="trendGraphic">
+              <span />
+              <span />
+              <span />
+              <span />
+              <span />
+            </div>
+
+            <div className="trendCompare">
+              <strong>—</strong>
+              <span>VS SEASON</span>
+            </div>
+          </div>
+        </section>
+
+        {/* LAST GAME */}
+
+        <section className="sectionCard">
+          <div className="sectionHeader">
+            <span>LAST GAME</span>
+          </div>
+
+          <div className="emptyGame">
+            Complete your first game to begin
+            building your Flight Path.
+          </div>
+        </section>
+
+        {/* FLIGHT PATH */}
+
+        <section className="pathCard">
+          <div className="sectionHeader">
+            <span>YOUR FLIGHT PATH</span>
+          </div>
+
+          <div className="pathLevels">
+            <PathLevel
+              icon="⌃"
+              name="ELEVATE"
+              className="elevate"
+            />
+
+            <div className="pathLine" />
+
+            <PathLevel
+              icon="⌃"
+              name="ASCEND"
+              className="ascend active"
+            />
+
+            <div className="pathLine" />
+
+            <PathLevel
+              icon="➤"
+              name="AIR"
+              className="air"
+            />
+
+            <div className="pathLine" />
+
+            <PathLevel
+              icon="☆"
+              name="SELECT"
+              className="select"
+            />
+          </div>
+        </section>
+
+        {/* BOTTOM NAV */}
+
+        <nav className="bottomNav">
+          <NavItem
+            icon="⌂"
+            label="HOME"
+            active
+          />
+
+          <NavItem
+            icon="▣"
+            label="LOG"
+          />
+
+          <button
+            type="button"
+            className="trackNav"
+            onClick={onStartGame}
+          >
+            <span>＋</span>
+            <small>TRACK</small>
+          </button>
+
+          <NavItem
+            icon="➤"
+            label="PATH"
+          />
+
+          <NavItem
+            icon="♙"
+            label="PLAYER"
+          />
+        </nav>
       </section>
-    </main>
-  );
-}
+
+      <style>{`
+        * {
+          box-sizing: border-box;
+        }
+
+        html,
+        body {
+          margin: 0;
+          background: #000;
+        }
+
+        button {
+          font: inherit;
+        }
+
+        .homePage {
+          min-height: 100vh;
+          background:
+            radial-gradient(
+              circle at 50% -10%,
+              #171717 0%,
+              #060606 28%,
+              #000 58%
+            );
+          color: white;
+          padding:
+            max(18px, env(safe-area-inset-top))
+            14px
+            calc(
+              96px +
+              env(safe-area-inset-bottom)
+            );
+          font-family:
+            Arial,
+            Helvetica,
+            sans-serif;
+        }
+
+        .phoneShell {
+          width: 100%;
+          max-width: 430px;
+          margin: 0 auto;
+        }
+
+        .topBar {
+          min-height: 58px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .brand {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          font-size: 16px;
+          font-weight: 950;
+          font-style: italic;
+          letter-spacing: -0.02em;
+        }
+
+        .plane {
+          display: inline-block;
+          color: #d59b21;
+          font-size: 19px;
+          transform: rotate(-26deg);
+        }
+
+        .iconButton {
+          width: 46px;
+          height: 46px;
+          border: none;
+          background: transparent;
+          color: white;
+          font-size: 26px;
+          cursor: pointer;
+        }
+
+        .playerHero {
+          display: flex;
+          align-items: center;
+          gap: 17px;
+          padding: 17px 0 20px;
+        }
+
+        .avatar {
+          width: 86px;
+          height: 86px;
+          flex: 0 0 86px;
+          padding: 2px;
+          border-radius: 50%;
+          background:
+            linear-gradient(
+              145deg,
+              #a34eea,
+              #582082,
+              #d59b21
+            );
+        }
+
+        .avatarInner {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          background:
+            radial-gradient(
+              circle at 50% 35%,
+              #26262b,
+              #0b0b0d 70%
+            );
+          color: white;
+          font-size: 27px;
+          font-weight: 950;
+        }
+
+        .playerIdentity {
+          min-width: 0;
+        }
+
+        .playerName {
+          color: #fff;
+          font-size: 28px;
+          line-height: 1;
+          font-weight: 950;
+          text-transform: uppercase;
+          letter-spacing: -0.035em;
+        }
+
+        .playerMeta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 9px;
+          color: #b3b3b8;
+          font-size: 13px;
+          font-weight: 700;
+        }
+
+        .dot {
+          color: #55555b;
+        }
+
+        .level {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          margin-top: 8px;
+          color: #a84df5;
+          font-size: 13px;
+          font-weight: 950;
+          letter-spacing:
