@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-
+import { supabase } from "../lib/supabase";
 /**
  * Fly Stat Tracker (Single Player)
  * - Tap big buttons during game (made/miss 2PT, 3PT, FT + ORB/DRB/AST/TO/STL/FOUL)
@@ -146,8 +146,22 @@ function TapButton({
     </button>
   );
 }
+type GameTrackerProps = {
+  playerId: string;
+  onGameSaved?: () => void;
+};
 
-export default function GameTracker() {
+type GameDraft = {
+  updatedAt: number;
+  date: string;
+  opponent: string;
+  notes: string;
+  counts: LiveCounts;
+};
+export default function GameTracker({
+  playerId,
+  onGameSaved,
+}: GameTrackerProps) {
   const [games, setGames] = useState<GameEntry[]>([]);
   const [counts, setCounts] = useState<LiveCounts>({ ...emptyCounts });
 
@@ -164,6 +178,12 @@ export default function GameTracker() {
 
   const mountedRef = useRef(false);
 
+  const [draftReady, setDraftReady] = useState(false);
+
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const DRAFT_KEY = `flightPath.gameDraft.${playerId}`;
+  
   // Step 1 support: stable tap flash timeout
   const tapTimeoutRef = useRef<number | null>(null);
 
@@ -185,7 +205,184 @@ export default function GameTracker() {
     if (!mountedRef.current) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(games));
   }, [games]);
+// --------------------------------------------------
+// FLIGHT PATH: restore unfinished live game
+// --------------------------------------------------
 
+useEffect(() => {
+  let cancelled = false;
+
+  async function restoreDraft() {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setDraftReady(true);
+        return;
+      }
+
+      let localDraft: GameDraft | null = null;
+
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+
+        if (raw) {
+          localDraft = JSON.parse(raw) as GameDraft;
+        }
+      } catch (error) {
+        console.error("Could not read local Flight Path draft:", error);
+      }
+
+      const { data: cloudDraft, error } = await supabase
+        .from("flight_game_drafts")
+        .select("*")
+        .eq("player_id", playerId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Could not load cloud Flight Path draft:", error);
+      }
+
+      if (cancelled) return;
+
+      const cloudUpdatedAt = cloudDraft?.updated_at
+        ? new Date(cloudDraft.updated_at).getTime()
+        : 0;
+
+      const localUpdatedAt = localDraft?.updatedAt ?? 0;
+
+      if (cloudDraft && cloudUpdatedAt > localUpdatedAt) {
+        setDate(cloudDraft.game_date || todayISO());
+        setOpponent(cloudDraft.opponent_name || "");
+        setNotes(cloudDraft.game_note || "");
+
+        setCounts({
+          made2: cloudDraft.two_pt_made ?? 0,
+          miss2: cloudDraft.two_pt_missed ?? 0,
+          made3: cloudDraft.three_pt_made ?? 0,
+          miss3: cloudDraft.three_pt_missed ?? 0,
+          madeFT: cloudDraft.ft_made ?? 0,
+          missFT: cloudDraft.ft_missed ?? 0,
+          orb: cloudDraft.offensive_rebounds ?? 0,
+          drb: cloudDraft.defensive_rebounds ?? 0,
+          ast: cloudDraft.assists ?? 0,
+          to: cloudDraft.turnovers ?? 0,
+          stl: cloudDraft.steals ?? 0,
+          pf: cloudDraft.fouls ?? 0,
+        });
+      } else if (localDraft) {
+        setDate(localDraft.date || todayISO());
+        setOpponent(localDraft.opponent || "");
+        setNotes(localDraft.notes || "");
+        setCounts(localDraft.counts);
+      }
+    } catch (error) {
+      console.error("Flight Path draft restore failed:", error);
+    } finally {
+      if (!cancelled) {
+        setDraftReady(true);
+      }
+    }
+  }
+
+  restoreDraft();
+
+  return () => {
+    cancelled = true;
+  };
+}, [playerId, DRAFT_KEY]);
+
+
+// --------------------------------------------------
+// FLIGHT PATH: autosave unfinished live game
+// --------------------------------------------------
+
+useEffect(() => {
+  if (!draftReady) return;
+
+  const localDraft: GameDraft = {
+    updatedAt: Date.now(),
+    date,
+    opponent,
+    notes,
+    counts,
+  };
+
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(localDraft));
+  } catch (error) {
+    console.error("Could not save local Flight Path draft:", error);
+  }
+
+  if (draftTimerRef.current) {
+    clearTimeout(draftTimerRef.current);
+  }
+
+  draftTimerRef.current = setTimeout(async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { error } = await supabase
+        .from("flight_game_drafts")
+        .upsert(
+          {
+            player_id: playerId,
+            user_id: user.id,
+            game_date: date,
+            opponent_name: opponent.trim(),
+            game_note: notes.trim() || null,
+
+            two_pt_made: counts.made2,
+            two_pt_missed: counts.miss2,
+            three_pt_made: counts.made3,
+            three_pt_missed: counts.miss3,
+            ft_made: counts.madeFT,
+            ft_missed: counts.missFT,
+
+            offensive_rebounds: counts.orb,
+            defensive_rebounds: counts.drb,
+
+            assists: counts.ast,
+            steals: counts.stl,
+            turnovers: counts.to,
+            blocks: 0,
+            fouls: counts.pf,
+            playing_seconds: 0,
+          },
+          {
+            onConflict: "player_id,user_id",
+          }
+        );
+
+      if (error) {
+        console.error("Flight Path cloud draft sync failed:", error);
+      }
+    } catch (error) {
+      console.error("Flight Path cloud draft sync failed:", error);
+    }
+  }, 400);
+
+  return () => {
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+    }
+  };
+}, [
+  draftReady,
+  playerId,
+  DRAFT_KEY,
+  date,
+  opponent,
+  notes,
+  counts,
+]);
   // Keep selected player sensible
   useEffect(() => {
     const names = Array.from(new Set(games.map((g) => g.playerName).filter(Boolean))).sort();
