@@ -13,6 +13,7 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -48,8 +49,8 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
 
         if (signInError) throw signInError;
 
-setMessage("You're signed in.");
-onSignedIn?.();
+        setMessage("You're signed in.");
+        onSignedIn?.();
       }
     } catch (err) {
       setError(
@@ -62,101 +63,84 @@ onSignedIn?.();
     }
   }
 
+  const isSignIn = mode === "signin";
+
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#050505",
-        color: "#ffffff",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "32px 20px",
-        fontFamily: "Arial, Helvetica, sans-serif",
-      }}
-    >
-      <section
-        style={{
-          width: "100%",
-          maxWidth: "420px",
-        }}
-      >
-        <div
-          style={{
-            marginBottom: "42px",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "11px",
-              letterSpacing: "0.28em",
-              color: "#929292",
-              fontWeight: 700,
-              marginBottom: "10px",
-            }}
-          >
-            THE FLY ACADEMY
+    <main className="authPage">
+      <section className="authShell">
+
+        {/* BRAND */}
+        <header className="brandBlock">
+          <div className="academyLabel">THE FLY ACADEMY</div>
+
+          <div className="brandRow">
+            <h1>FLIGHT PATH</h1>
+            <span className="planeMark">➤</span>
           </div>
 
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "42px",
-              lineHeight: 0.95,
-              fontWeight: 900,
-              letterSpacing: "-0.04em",
-              textTransform: "uppercase",
-            }}
-          >
-            Flight Path
-          </h1>
+          <div className="tagline">
+            TRACK <span>YOUR</span> GAME. SEE <span>YOUR</span> JOURNEY.
+          </div>
+        </header>
 
-          <p
-            style={{
-              margin: "14px 0 0",
-              color: "#b5b5b5",
-              fontSize: "15px",
-              lineHeight: 1.5,
-            }}
-          >
-            Track your game. See your journey.
+        {/* LEVEL JOURNEY */}
+        <section className="journey">
+          <div className="journeyStep elevate">
+            <div className="journeyIcon">⌃</div>
+            <strong>ELEVATE</strong>
+          </div>
+
+          <div className="arrow">→</div>
+
+          <div className="journeyStep ascend">
+            <div className="journeyIcon">⌃</div>
+            <strong>ASCEND</strong>
+          </div>
+
+          <div className="arrow">→</div>
+
+          <div className="journeyStep air">
+            <div className="journeyIcon airIcon">➤</div>
+            <strong>AIR</strong>
+          </div>
+
+          <div className="arrow">→</div>
+
+          <div className="journeyStep select">
+            <div className="journeyIcon starIcon">☆</div>
+            <strong>SELECT</strong>
+          </div>
+        </section>
+
+        {/* INTRO */}
+        <section className="intro">
+          <div className="eyebrow">
+            {isSignIn ? "WELCOME BACK" : "WELCOME TO FLIGHT PATH"}
+          </div>
+
+          <h2>
+            {isSignIn
+              ? "Your player's journey continues."
+              : "Start tracking the journey."}
+          </h2>
+
+          <p>
+            {isSignIn
+              ? "Sign in to track games, review progress and see how your player develops over time."
+              : "Create your family account and start building your player's Flight Path."}
           </p>
-        </div>
+        </section>
 
-        <div
-          style={{
-            border: "1px solid #2a2a2a",
-            borderRadius: "22px",
-            padding: "26px",
-            background: "#0d0d0d",
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "6px",
-              padding: "5px",
-              background: "#171717",
-              borderRadius: "12px",
-              marginBottom: "28px",
-            }}
-          >
+        {/* AUTH */}
+        <section className="authCard">
+          <div className="modeTabs">
             <button
               type="button"
+              className={isSignIn ? "active" : ""}
               onClick={() => {
                 setMode("signin");
                 setMessage("");
                 setError("");
-              }}
-              style={{
-                border: "none",
-                borderRadius: "9px",
-                padding: "11px 8px",
-                cursor: "pointer",
-                fontWeight: 800,
-                background: mode === "signin" ? "#ffffff" : "transparent",
-                color: mode === "signin" ? "#000000" : "#8d8d8d",
               }}
             >
               SIGN IN
@@ -164,150 +148,68 @@ onSignedIn?.();
 
             <button
               type="button"
+              className={!isSignIn ? "active" : ""}
               onClick={() => {
                 setMode("signup");
                 setMessage("");
                 setError("");
-              }}
-              style={{
-                border: "none",
-                borderRadius: "9px",
-                padding: "11px 8px",
-                cursor: "pointer",
-                fontWeight: 800,
-                background: mode === "signup" ? "#ffffff" : "transparent",
-                color: mode === "signup" ? "#000000" : "#8d8d8d",
               }}
             >
               CREATE ACCOUNT
             </button>
           </div>
 
-          <h2
-            style={{
-              margin: "0 0 6px",
-              fontSize: "22px",
-              fontWeight: 800,
-            }}
-          >
-            {mode === "signin" ? "Welcome back." : "Start your Flight Path."}
-          </h2>
-
-          <p
-            style={{
-              margin: "0 0 24px",
-              color: "#909090",
-              fontSize: "14px",
-              lineHeight: 1.5,
-            }}
-          >
-            {mode === "signin"
-              ? "Sign in to continue your player's journey."
-              : "Create your account and track your first 2 games free."}
-          </p>
-
           <form onSubmit={handleSubmit}>
-            <label
-              style={{
-                display: "block",
-                fontSize: "11px",
-                fontWeight: 800,
-                letterSpacing: "0.12em",
-                color: "#aaaaaa",
-                marginBottom: "7px",
-              }}
-            >
-              EMAIL
+            <label className="field">
+              <span>EMAIL</span>
+
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
+                placeholder="you@email.com"
+              />
             </label>
 
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              autoComplete="email"
-              placeholder="you@email.com"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                border: "1px solid #343434",
-                background: "#111111",
-                color: "#ffffff",
-                borderRadius: "12px",
-                padding: "15px 14px",
-                fontSize: "16px",
-                outline: "none",
-                marginBottom: "18px",
-              }}
-            />
+            <label className="field">
+              <span>PASSWORD</span>
 
-            <label
-              style={{
-                display: "block",
-                fontSize: "11px",
-                fontWeight: 800,
-                letterSpacing: "0.12em",
-                color: "#aaaaaa",
-                marginBottom: "7px",
-              }}
-            >
-              PASSWORD
+              <div className="passwordField">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete={
+                    isSignIn ? "current-password" : "new-password"
+                  }
+                  placeholder="••••••••"
+                />
+
+                <button
+                  type="button"
+                  className="showPassword"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={
+                    showPassword ? "Hide password" : "Show password"
+                  }
+                >
+                  {showPassword ? "HIDE" : "SHOW"}
+                </button>
+              </div>
             </label>
-
-            <input
-              type="password"
-              required
-              minLength={6}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={
-                mode === "signin" ? "current-password" : "new-password"
-              }
-              placeholder="••••••••"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                border: "1px solid #343434",
-                background: "#111111",
-                color: "#ffffff",
-                borderRadius: "12px",
-                padding: "15px 14px",
-                fontSize: "16px",
-                outline: "none",
-                marginBottom: "18px",
-              }}
-            />
 
             {error && (
-              <div
-                style={{
-                  background: "#3a1010",
-                  border: "1px solid #7d1d1d",
-                  color: "#ffb3b3",
-                  borderRadius: "10px",
-                  padding: "12px",
-                  marginBottom: "18px",
-                  fontSize: "13px",
-                  lineHeight: 1.45,
-                }}
-              >
+              <div className="message errorMessage">
                 {error}
               </div>
             )}
 
             {message && (
-              <div
-                style={{
-                  background: "#102817",
-                  border: "1px solid #235b32",
-                  color: "#b9f7c7",
-                  borderRadius: "10px",
-                  padding: "12px",
-                  marginBottom: "18px",
-                  fontSize: "13px",
-                  lineHeight: 1.45,
-                }}
-              >
+              <div className="message successMessage">
                 {message}
               </div>
             )}
@@ -315,40 +217,608 @@ onSignedIn?.();
             <button
               type="submit"
               disabled={loading}
-              style={{
-                width: "100%",
-                border: "none",
-                borderRadius: "12px",
-                padding: "16px",
-                background: "#ffffff",
-                color: "#000000",
-                fontSize: "14px",
-                fontWeight: 900,
-                cursor: loading ? "default" : "pointer",
-                opacity: loading ? 0.65 : 1,
-              }}
+              className="primaryButton"
             >
-              {loading
-                ? "PLEASE WAIT..."
-                : mode === "signin"
-                  ? "SIGN IN"
-                  : "CREATE MY ACCOUNT"}
+              {loading ? (
+                "PLEASE WAIT..."
+              ) : (
+                <>
+                  {isSignIn
+                    ? "ENTER FLIGHT PATH"
+                    : "CREATE MY ACCOUNT"}
+                  <span>→</span>
+                </>
+              )}
             </button>
           </form>
-        </div>
+        </section>
 
-        <div
-          style={{
-            marginTop: "24px",
-            textAlign: "center",
-            color: "#666666",
-            fontSize: "11px",
-            lineHeight: 1.5,
-          }}
-        >
-          PRIVATE BY DEFAULT. SHARED BY CHOICE.
-        </div>
+        {/* TRUST */}
+        <section className="trustSection">
+          <div className="trustItem">
+            <div className="trustIcon">◇</div>
+
+            <div>
+              <strong>YOUR DATA</strong>
+              <span>Private by default.</span>
+            </div>
+          </div>
+
+          <div className="trustItem">
+            <div className="trustIcon">☁</div>
+
+            <div>
+              <strong>SAVED IN THE CLOUD</strong>
+              <span>Your journey stays with you.</span>
+            </div>
+          </div>
+
+          <div className="trustItem">
+            <div className="trustIcon">◎</div>
+
+            <div>
+              <strong>BUILT FOR FLY FAMILIES</strong>
+              <span>Parents track. Players grow.</span>
+            </div>
+          </div>
+        </section>
+
+        <footer>
+          <strong>THE FLY ACADEMY</strong>
+          <span>PREPARE FOR TAKEOFF.</span>
+        </footer>
       </section>
-    </main>
-  );
-}
+
+      <style>{`
+        :root {
+          --black: #000000;
+          --panel: #0b0b0d;
+          --white: #ffffff;
+          --muted: #9a9aa0;
+          --line: #29292f;
+
+          --purple: #7024ad;
+          --purpleBright: #a54df2;
+          --gold: #d49a19;
+          --cyan: #00b5c9;
+        }
+
+        * {
+          box-sizing: border-box;
+        }
+
+        html,
+        body {
+          margin: 0;
+          background: #000;
+        }
+
+        button,
+        input {
+          font: inherit;
+        }
+
+        .authPage {
+          min-height: 100vh;
+
+          display: flex;
+          justify-content: center;
+
+          padding:
+            max(30px, env(safe-area-inset-top))
+            20px
+            max(28px, env(safe-area-inset-bottom));
+
+          background:
+            radial-gradient(
+              circle at 50% -10%,
+              #191919 0%,
+              #070707 33%,
+              #000 65%
+            );
+
+          color: white;
+
+          font-family:
+            Arial,
+            Helvetica,
+            sans-serif;
+        }
+
+        .authShell {
+          width: 100%;
+          max-width: 430px;
+        }
+
+        /* BRAND */
+
+        .brandBlock {
+          text-align: center;
+          padding-top: 8px;
+        }
+
+        .academyLabel {
+          color: #929298;
+
+          font-size: 11px;
+          font-weight: 800;
+
+          letter-spacing: .27em;
+
+          margin-bottom: 11px;
+        }
+
+        .brandRow {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+
+          gap: 10px;
+        }
+
+        .brandRow h1 {
+          margin: 0;
+
+          color: white;
+
+          font-size: 40px;
+          line-height: .95;
+
+          font-weight: 1000;
+          font-style: italic;
+
+          letter-spacing: -.055em;
+        }
+
+        .planeMark {
+          display: inline-block;
+
+          color: var(--gold);
+
+          font-size: 29px;
+
+          transform: rotate(-26deg);
+        }
+
+        .tagline {
+          margin-top: 13px;
+
+          color: #e5e5e7;
+
+          font-size: 12px;
+          font-weight: 900;
+
+          letter-spacing: .13em;
+        }
+
+        .tagline span {
+          color: var(--gold);
+        }
+
+        /* JOURNEY */
+
+        .journey {
+          display: grid;
+
+          grid-template-columns:
+            1fr
+            20px
+            1fr
+            20px
+            1fr
+            20px
+            1fr;
+
+          align-items: center;
+
+          margin-top: 30px;
+
+          padding:
+            18px
+            2px;
+
+          border-top:
+            1px solid #26262a;
+
+          border-bottom:
+            1px solid #202024;
+        }
+
+        .journeyStep {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+
+          gap: 7px;
+        }
+
+        .journeyIcon {
+          height: 31px;
+
+          display: flex;
+          align-items: center;
+          justify-content: center;
+
+          font-size: 30px;
+          line-height: 1;
+
+          font-weight: 900;
+        }
+
+        .journeyStep strong {
+          font-size: 10px;
+          font-weight: 1000;
+
+          letter-spacing: .055em;
+        }
+
+        .arrow {
+          color: #5f5f65;
+
+          text-align: center;
+
+          font-size: 16px;
+        }
+
+        .elevate {
+          color: var(--gold);
+        }
+
+        .ascend {
+          color: var(--purpleBright);
+        }
+
+        .air {
+          color: var(--cyan);
+        }
+
+        .select {
+          color: white;
+        }
+
+        .airIcon {
+          transform: rotate(-25deg);
+        }
+
+        .starIcon {
+          font-size: 34px;
+        }
+
+        /* INTRO */
+
+        .intro {
+          padding:
+            31px
+            4px
+            22px;
+        }
+
+        .eyebrow {
+          color: var(--purpleBright);
+
+          font-size: 11px;
+          font-weight: 900;
+
+          letter-spacing: .18em;
+
+          margin-bottom: 10px;
+        }
+
+        .intro h2 {
+          margin: 0;
+
+          color: #ffffff;
+
+          font-size: 30px;
+          line-height: 1.08;
+
+          font-weight: 950;
+
+          letter-spacing: -.025em;
+        }
+
+        .intro p {
+          margin:
+            12px
+            0
+            0;
+
+          color: #a7a7ad;
+
+          font-size: 14px;
+          line-height: 1.55;
+        }
+
+        /* AUTH CARD */
+
+        .authCard {
+          padding: 11px;
+
+          border:
+            1px solid
+            #303036;
+
+          border-radius: 18px;
+
+          background:
+            linear-gradient(
+              180deg,
+              #101012,
+              #080809
+            );
+
+          box-shadow:
+            0
+            20px
+            50px
+            rgba(0,0,0,.45);
+        }
+
+        .modeTabs {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+
+          gap: 5px;
+
+          padding: 4px;
+
+          margin-bottom: 20px;
+
+          background: #050506;
+
+          border:
+            1px solid
+            #1f1f23;
+
+          border-radius: 11px;
+        }
+
+        .modeTabs button {
+          min-height: 47px;
+
+          border: none;
+          border-radius: 8px;
+
+          background: transparent;
+
+          color: #77777d;
+
+          font-size: 12px;
+          font-weight: 900;
+
+          letter-spacing: .06em;
+
+          cursor: pointer;
+        }
+
+        .modeTabs button.active {
+          color: white;
+
+          background:
+            linear-gradient(
+              180deg,
+              #202023,
+              #151517
+            );
+
+          box-shadow:
+            inset
+            0
+            0
+            0
+            1px
+            rgba(255,255,255,.08);
+        }
+
+        form {
+          padding:
+            0
+            5px
+            5px;
+        }
+
+        .field {
+          display: block;
+
+          margin-bottom: 16px;
+        }
+
+        .field > span {
+          display: block;
+
+          margin:
+            0
+            0
+            8px
+            2px;
+
+          color: #a5a5aa;
+
+          font-size: 11px;
+          font-weight: 900;
+
+          letter-spacing: .14em;
+        }
+
+        .field input {
+          width: 100%;
+          height: 54px;
+
+          border:
+            1px solid
+            #36363b;
+
+          border-radius: 10px;
+
+          outline: none;
+
+          background: #0c0c0e;
+
+          color: white;
+
+          padding:
+            0
+            15px;
+
+          font-size: 16px;
+        }
+
+        .field input::placeholder {
+          color: #64646a;
+        }
+
+        .field input:focus {
+          border-color: #8d3ed2;
+
+          box-shadow:
+            0
+            0
+            0
+            3px
+            rgba(141,62,210,.13);
+        }
+
+        .passwordField {
+          position: relative;
+        }
+
+        .passwordField input {
+          padding-right: 70px;
+        }
+
+        .showPassword {
+          position: absolute;
+
+          top: 0;
+          right: 5px;
+
+          height: 54px;
+
+          padding:
+            0
+            11px;
+
+          border: none;
+
+          background: transparent;
+
+          color: #a5a5aa;
+
+          font-size: 10px;
+          font-weight: 900;
+
+          letter-spacing: .07em;
+
+          cursor: pointer;
+        }
+
+        .message {
+          margin-bottom: 16px;
+
+          padding: 12px;
+
+          border-radius: 9px;
+
+          font-size: 13px;
+          line-height: 1.45;
+        }
+
+        .errorMessage {
+          background: #351010;
+
+          border:
+            1px solid
+            #762020;
+
+          color: #ffb5b5;
+        }
+
+        .successMessage {
+          background: #102817;
+
+          border:
+            1px solid
+            #235b32;
+
+          color: #b9f7c7;
+        }
+
+        .primaryButton {
+          width: 100%;
+          min-height: 58px;
+
+          border:
+            1px solid
+            #9846e5;
+
+          border-radius: 10px;
+
+          display: flex;
+          justify-content: center;
+          align-items: center;
+
+          gap: 11px;
+
+          background:
+            linear-gradient(
+              110deg,
+              #34105e,
+              #7024ad 52%,
+              #42116f
+            );
+
+          color: white;
+
+          font-size: 13px;
+          font-weight: 950;
+
+          letter-spacing: .075em;
+
+          cursor: pointer;
+        }
+
+        .primaryButton span {
+          font-size: 20px;
+          font-weight: 400;
+        }
+
+        .primaryButton:active {
+          transform: scale(.985);
+          filter: brightness(1.18);
+        }
+
+        .primaryButton:disabled {
+          opacity: .65;
+          cursor: default;
+        }
+
+        /* TRUST */
+
+        .trustSection {
+          display: grid;
+          grid-template-columns: 1fr;
+
+          gap: 13px;
+
+          margin-top: 25px;
+
+          padding-top: 21px;
+
+          border-top:
+            1px solid
+            #252529;
+        }
+
+        .trustItem {
+          display: flex;
+          align-items: center;
+
+          gap: 12px;
+
+          padding:
+            0
+            4px;
+        }
+
+        .trustIcon {
+          width
