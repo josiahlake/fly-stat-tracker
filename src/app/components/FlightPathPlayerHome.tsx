@@ -13,7 +13,22 @@ type PlayerHomeData = {
   gamesTotal: number;
   gamesUsed: number;
 };
-
+type LiveGameDraft = {
+  opponentName: string;
+  gameDate: string;
+  points: number;
+  rebounds: number;
+  assists: number;
+  steals: number;
+  turnovers: number;
+  fouls: number;
+  fieldGoalsMade: number;
+  fieldGoalsAttempted: number;
+  threePointersMade: number;
+  threePointersAttempted: number;
+  freeThrowsMade: number;
+  freeThrowsAttempted: number;
+};
 type Props = {
   playerId: string;
   onStartGame?: () => void;
@@ -23,9 +38,10 @@ export default function FlightPathPlayerHome({
   playerId,
   onStartGame,
 }: Props) {
-  const [data, setData] = useState<PlayerHomeData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+const [data, setData] = useState<PlayerHomeData | null>(null);
+const [liveGame, setLiveGame] = useState<LiveGameDraft | null>(null);
+const [loading, setLoading] = useState(true);
+const [error, setError] = useState("");
 
   useEffect(() => {
     async function loadPlayerHome() {
@@ -78,7 +94,74 @@ export default function FlightPathPlayerHome({
           .maybeSingle();
 
         if (entitlementError) throw entitlementError;
+const { data: draft, error: draftError } = await supabase
+  .from("flight_game_drafts")
+  .select(`
+    game_date,
+    opponent_name,
+    two_pt_made,
+    two_pt_missed,
+    three_pt_made,
+    three_pt_missed,
+    ft_made,
+    ft_missed,
+    offensive_rebounds,
+    defensive_rebounds,
+    assists,
+    steals,
+    turnovers,
+    fouls
+  `)
+  .eq("player_id", playerId)
+  .eq("user_id", user.id)
+  .maybeSingle();
 
+if (draftError) throw draftError;
+
+if (draft) {
+  const fgMade =
+    (draft.two_pt_made ?? 0) +
+    (draft.three_pt_made ?? 0);
+
+  const fgAttempts =
+    fgMade +
+    (draft.two_pt_missed ?? 0) +
+    (draft.three_pt_missed ?? 0);
+
+  const threeMade = draft.three_pt_made ?? 0;
+  const threeAttempts =
+    threeMade +
+    (draft.three_pt_missed ?? 0);
+
+  const ftMade = draft.ft_made ?? 0;
+  const ftAttempts =
+    ftMade +
+    (draft.ft_missed ?? 0);
+
+  setLiveGame({
+    opponentName: draft.opponent_name || "Opponent",
+    gameDate: draft.game_date || "",
+    points:
+      ((draft.two_pt_made ?? 0) * 2) +
+      ((draft.three_pt_made ?? 0) * 3) +
+      (draft.ft_made ?? 0),
+    rebounds:
+      (draft.offensive_rebounds ?? 0) +
+      (draft.defensive_rebounds ?? 0),
+    assists: draft.assists ?? 0,
+    steals: draft.steals ?? 0,
+    turnovers: draft.turnovers ?? 0,
+    fouls: draft.fouls ?? 0,
+    fieldGoalsMade: fgMade,
+    fieldGoalsAttempted: fgAttempts,
+    threePointersMade: threeMade,
+    threePointersAttempted: threeAttempts,
+    freeThrowsMade: ftMade,
+    freeThrowsAttempted: ftAttempts,
+  });
+} else {
+  setLiveGame(null);
+}
         setData({
           playerId: player.id,
           firstName: player.first_name,
@@ -256,65 +339,191 @@ export default function FlightPathPlayerHome({
           </div>
         </div>
 
+        {liveGame ? (
+  <div
+    style={{
+      border: "1px solid #343434",
+      borderRadius: "24px",
+      padding: "26px",
+      background: "#101010",
+      marginBottom: "16px",
+    }}
+  >
+    <div
+      style={{
+        color: "#8f8f8f",
+        fontSize: "10px",
+        letterSpacing: "0.18em",
+        fontWeight: 800,
+        marginBottom: "10px",
+      }}
+    >
+      GAME IN PROGRESS
+    </div>
+
+    <div
+      style={{
+        fontSize: "24px",
+        fontWeight: 900,
+        marginBottom: "5px",
+      }}
+    >
+      vs. {liveGame.opponentName}
+    </div>
+
+    <div
+      style={{
+        color: "#888888",
+        fontSize: "13px",
+        marginBottom: "22px",
+      }}
+    >
+      Your live game is automatically saved.
+    </div>
+
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(4, 1fr)",
+        gap: "8px",
+        marginBottom: "14px",
+      }}
+    >
+      {[
+        ["PTS", liveGame.points],
+        ["REB", liveGame.rebounds],
+        ["AST", liveGame.assists],
+        ["STL", liveGame.steals],
+      ].map(([label, value]) => (
         <div
+          key={label}
           style={{
             border: "1px solid #292929",
-            borderRadius: "24px",
-            padding: "26px",
-            background: "#0d0d0d",
-            marginBottom: "16px",
+            borderRadius: "14px",
+            padding: "13px 10px",
+            background: "#0a0a0a",
           }}
         >
           <div
             style={{
               color: "#777777",
-              fontSize: "10px",
-              letterSpacing: "0.18em",
+              fontSize: "8px",
+              letterSpacing: "0.14em",
               fontWeight: 800,
-              marginBottom: "8px",
+              marginBottom: "6px",
             }}
           >
-            YOUR ACCESS
+            {label}
           </div>
 
           <div
             style={{
-              fontSize: "30px",
+              fontSize: "20px",
               fontWeight: 900,
-              marginBottom: "4px",
             }}
           >
-            {gamesRemaining}
+            {value}
           </div>
-
-          <div
-            style={{
-              color: "#a0a0a0",
-              fontSize: "14px",
-              marginBottom: "22px",
-            }}
-          >
-            {gamesRemaining === 1 ? "free game remaining" : "free games remaining"}
-          </div>
-
-         <button
-  type="button"
-  onClick={onStartGame}
-  style={{
-              width: "100%",
-              border: "none",
-              borderRadius: "14px",
-              padding: "17px",
-              background: "#ffffff",
-              color: "#000000",
-              fontSize: "15px",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
-            START GAME →
-          </button>
         </div>
+      ))}
+    </div>
+
+    <div
+      style={{
+        color: "#999999",
+        fontSize: "12px",
+        lineHeight: 1.6,
+        marginBottom: "20px",
+      }}
+    >
+      FG {liveGame.fieldGoalsMade}-{liveGame.fieldGoalsAttempted}
+      {" · "}
+      3PT {liveGame.threePointersMade}-{liveGame.threePointersAttempted}
+      {" · "}
+      FT {liveGame.freeThrowsMade}-{liveGame.freeThrowsAttempted}
+    </div>
+
+    <button
+      type="button"
+      onClick={onStartGame}
+      style={{
+        width: "100%",
+        border: "none",
+        borderRadius: "14px",
+        padding: "17px",
+        background: "#ffffff",
+        color: "#000000",
+        fontSize: "15px",
+        fontWeight: 900,
+        cursor: "pointer",
+      }}
+    >
+      RESUME GAME →
+    </button>
+  </div>
+) : (
+  <div
+    style={{
+      border: "1px solid #292929",
+      borderRadius: "24px",
+      padding: "26px",
+      background: "#0d0d0d",
+      marginBottom: "16px",
+    }}
+  >
+    <div
+      style={{
+        color: "#777777",
+        fontSize: "10px",
+        letterSpacing: "0.18em",
+        fontWeight: 800,
+        marginBottom: "8px",
+      }}
+    >
+      YOUR ACCESS
+    </div>
+
+    <div
+      style={{
+        fontSize: "30px",
+        fontWeight: 900,
+        marginBottom: "4px",
+      }}
+    >
+      {gamesRemaining}
+    </div>
+
+    <div
+      style={{
+        color: "#a0a0a0",
+        fontSize: "14px",
+        marginBottom: "22px",
+      }}
+    >
+      {gamesRemaining === 1
+        ? "free game remaining"
+        : "free games remaining"}
+    </div>
+
+    <button
+      type="button"
+      onClick={onStartGame}
+      style={{
+        width: "100%",
+        border: "none",
+        borderRadius: "14px",
+        padding: "17px",
+        background: "#ffffff",
+        color: "#000000",
+        fontSize: "15px",
+        fontWeight: 900,
+        cursor: "pointer",
+      }}
+    >
+      START GAME →
+    </button>
+  </div>
+)}
 
         <div
           style={{
