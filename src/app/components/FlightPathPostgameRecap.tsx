@@ -1,3 +1,4 @@
+import FlightLevelMark from "./FlightLevelMark";
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -417,83 +418,41 @@ export default function FlightPathPostgameRecap({
 
         {/* LEVEL SYSTEM */}
 
-        <section className="levels">
-          <Level
-            type="elevate"
-            icon={
-              <svg viewBox="0 0 64 64">
-                <path
-                  d="M9 47C21 49 34 44 42 35C47 29 50 23 52 17"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="7"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M40 17L55 11L58 27"
-                  fill="currentColor"
-                />
-              </svg>
-            }
-            name="[ELEVATE]"
-            sub="DEVELOP TO PLAY"
-          />
+<section className="levels">
+  <FlightLevelMark
+    level="elevate"
+    showName
+    showDescriptor
+    size="md"
+  />
 
-          <div className="levelArrow">→</div>
+  <div className="levelArrow">→</div>
 
-          <Level
-            type="ascend"
-            icon={
-              <svg viewBox="0 0 64 64">
-                <path
-                  d="M12 36L32 20L52 36V48L32 32L12 48V36Z"
-                  fill="currentColor"
-                />
-                <path
-                  d="M12 20L32 4L52 20V32L32 16L12 32V20Z"
-                  fill="currentColor"
-                />
-              </svg>
-            }
-            name="[ASCEND]"
-            sub="PLAY TO COMPETE"
-          />
+  <FlightLevelMark
+    level="ascend"
+    showName
+    showDescriptor
+    size="md"
+  />
 
-          <div className="levelArrow">→</div>
+  <div className="levelArrow">→</div>
 
-          <Level
-            type="air"
-            icon={
-              <svg viewBox="0 0 64 64">
-                <path
-                  d="M5 27L59 6L43 57L30 39L18 49L21 34L5 27Z"
-                  fill="currentColor"
-                />
-              </svg>
-            }
-            name="[AIR]"
-            sub="COMPETE TO DOMINATE"
-          />
+  <FlightLevelMark
+    level="air"
+    showName
+    showDescriptor
+    size="md"
+  />
 
-          <div className="levelArrow">→</div>
+  <div className="levelArrow">→</div>
 
-          <Level
-            type="select"
-            icon={
-              <svg viewBox="0 0 64 64">
-                <path
-                  d="M32 5L39.5 22.5L58 24L44 36L48.5 55L32 45L15.5 55L20 36L6 24L24.5 22.5L32 5Z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            }
-            name="[SELECT]"
-            sub="COMPETE BEYOND"
-          />
-        </section>
+  <FlightLevelMark
+    level="select"
+    showName
+    showDescriptor
+    size="md"
+  />
+</section>
 
         {/* GAME COMPLETE */}
 
