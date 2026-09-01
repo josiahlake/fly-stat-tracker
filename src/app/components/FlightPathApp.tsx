@@ -19,35 +19,42 @@ export default function FlightPathApp() {
   const [playerId, setPlayerId] = useState<string | null>(null);
 
   async function checkAccount() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-    if (!user) {
+      if (userError || !user) {
+        setPlayerId(null);
+        setAppState("signed-out");
+        return;
+      }
+
+      const { data: access, error } = await supabase
+        .from("flight_player_access")
+        .select("player_id")
+        .eq("user_id", user.id)
+        .limit(1);
+
+      if (error) {
+        console.error("Could not load player access:", error);
+        setPlayerId(null);
+        setAppState("needs-player");
+        return;
+      }
+
+      if (access && access.length > 0) {
+        setPlayerId(access[0].player_id);
+        setAppState("has-player");
+      } else {
+        setPlayerId(null);
+        setAppState("needs-player");
+      }
+    } catch (error) {
+      console.error("Flight Path account check failed:", error);
       setPlayerId(null);
       setAppState("signed-out");
-      return;
-    }
-
-    const { data: access, error } = await supabase
-      .from("flight_player_access")
-      .select("player_id")
-      .eq("user_id", user.id)
-      .limit(1);
-
-    if (error) {
-      console.error(error);
-      setPlayerId(null);
-      setAppState("needs-player");
-      return;
-    }
-
-    if (access && access.length > 0) {
-      setPlayerId(access[0].player_id);
-      setAppState("has-player");
-    } else {
-      setPlayerId(null);
-      setAppState("needs-player");
     }
   }
 
@@ -116,14 +123,15 @@ export default function FlightPathApp() {
     );
   }
 
-if (appState === "tracking-game" && playerId) {
-  return (
-    <GameTracker
-      playerId={playerId}
-      onGameSaved={() => setAppState("has-player")}
-    />
-  );
-}
+  if (appState === "tracking-game" && playerId) {
+    return (
+      <GameTracker
+        playerId={playerId}
+        onGameSaved={() => setAppState("has-player")}
+        onExitGame={() => setAppState("has-player")}
+      />
+    );
+  }
 
   return null;
 }
