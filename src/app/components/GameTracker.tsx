@@ -559,30 +559,171 @@ useEffect(() => {
     if (ok) resetLive();
   };
 
-  const saveGame = () => {
+  // --------------------------------------------------
+  // FLIGHT PATH: manual safety save
+  // --------------------------------------------------
+
+  const saveProgress = async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        alert("Please sign in again.");
+        return;
+      }
+
+      const localDraft: GameDraft = {
+        updatedAt: Date.now(),
+        date,
+        opponent,
+        notes,
+        counts: { ...counts },
+      };
+
+      // Save immediately on this device.
+      if (typeof window !== "undefined") {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(localDraft));
+      }
+
+      // Save immediately to Supabase.
+      const { error } = await supabase
+        .from("flight_game_drafts")
+        .upsert(
+          {
+            player_id: playerId,
+            user_id: user.id,
+            game_date: date || todayISO(),
+            opponent_name: opponent.trim(),
+            game_note: notes.trim() || null,
+
+            two_pt_made: counts.made2,
+            two_pt_missed: counts.miss2,
+
+            three_pt_made: counts.made3,
+            three_pt_missed: counts.miss3,
+
+            ft_made: counts.madeFT,
+            ft_missed: counts.missFT,
+
+            offensive_rebounds: counts.orb,
+            defensive_rebounds: counts.drb,
+
+            assists: counts.ast,
+            steals: counts.stl,
+            turnovers: counts.to,
+
+            blocks: 0,
+            fouls: counts.pf,
+            playing_seconds: 0,
+          },
+          {
+            onConflict: "player_id,user_id",
+          }
+        );
+
+      if (error) throw error;
+
+      alert("Progress saved.");
+    } catch (error) {
+      console.error("Could not save game progress:", error);
+
+      alert(
+        "We couldn't save your progress to the cloud. Your most recent stats should still be saved on this device."
+      );
+    }
+  };
+
+  // --------------------------------------------------
+  // FLIGHT PATH: finalize completed game
+  // --------------------------------------------------
+
+  const finalizeGame = async () => {
+    const confirmed = window.confirm(
+      "Finalize this game?\n\nThis will save the final stats to your player's Flight Path and close the live game."
+    );
+
+    if (!confirmed) return;
+
     const p = playerName.trim();
+
     if (!p) {
       alert("Please enter Player Name.");
       return;
     }
 
-    const entry: GameEntry = {
-      id: makeId(),
-      createdAt: Date.now(),
-      date: date || todayISO(),
-      team: team.trim() || "Fly Academy",
-      opponent: opponent.trim(),
-      playerName: p,
-      notes: notes.trim() || undefined,
-      counts: { ...counts },
-    };
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    setGames((g) => [entry, ...g]);
-    setSelectedPlayer(p);
+      if (!user) {
+        alert("Please sign in again.");
+        return;
+      }
 
-    resetLive();
+      //
+      // Preserve the existing completed-game record.
+      // We will move completed games fully into Supabase next.
+      //
+      const entry: GameEntry = {
+        id: makeId(),
+        createdAt: Date.now(),
+        date: date || todayISO(),
+        team: team.trim() || "Fly Academy",
+        opponent: opponent.trim(),
+        playerName: p,
+        notes: notes.trim() || undefined,
+        counts: { ...counts },
+      };
+
+      setGames((g) => [entry, ...g]);
+      setSelectedPlayer(p);
+
+      //
+      // The game is now complete, so remove the unfinished cloud draft.
+      //
+      const { error: draftDeleteError } = await supabase
+        .from("flight_game_drafts")
+        .delete()
+        .eq("player_id", playerId)
+        .eq("user_id", user.id);
+
+      if (draftDeleteError) {
+        console.error(
+          "Could not clear completed Flight Path draft:",
+          draftDeleteError
+        );
+      }
+
+      //
+      // Remove the device copy of the unfinished game.
+      //
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(DRAFT_KEY);
+      }
+
+      //
+      // Clear the tracker only AFTER finalization.
+      //
+      resetLive();
+
+      //
+      // Tell FlightPathApp that the completed game is finished
+      // so it can return to Player Home.
+      //
+      if (onGameSaved) {
+        onGameSaved();
+      }
+    } catch (error) {
+      console.error("Could not finalize game:", error);
+
+      alert(
+        "We couldn't finalize the game. Your live game has not been intentionally cleared. Please try again."
+      );
+    }
   };
-
   const deleteGame = (id: string) => {
     setGames((g) => g.filter((x) => x.id !== id));
   };
@@ -618,14 +759,50 @@ useEffect(() => {
         {/* LEFT: Live game tracker */}
         <div className="card">
           <div className="cardHeader">
-            <div>
-              <div className="cardTitle">Live Game Tracker</div>
-              <div className="cardHint">Big buttons • fast taps • phone-friendly</div>
-            </div>
-            <button className="primaryBtn" onClick={saveGame} type="button">
-              Save
-            </button>
-          </div>
+  <div>
+    <div className="cardTitle">Live Game Tracker</div>
+    <div className="cardHint">
+      Stats auto-save as you track.
+    </div>
+  </div>
+
+  <div
+    style={{
+      display: "flex",
+      gap: "8px",
+      alignItems: "center",
+      flexWrap: "wrap",
+      justifyContent: "flex-end",
+    }}
+  >
+    <div
+      style={{
+        fontSize: "11px",
+        color: "rgba(0,0,0,.50)",
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+      }}
+    >
+      AUTO-SAVED ✓
+    </div>
+
+    <button
+      className="ghostBtn"
+      onClick={saveProgress}
+      type="button"
+    >
+      SAVE PROGRESS
+    </button>
+
+    <button
+      className="primaryBtn"
+      onClick={finalizeGame}
+      type="button"
+    >
+      FINALIZE GAME →
+    </button>
+  </div>
+</div>
 
           <div className="formGrid">
             <div className="field">
