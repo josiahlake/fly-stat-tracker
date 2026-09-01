@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useState,
-} from "react";
+import { useEffect, useState } from "react";
 
 import FlightPathAuth from "./FlightPathAuth";
 import FlightPathPlayerSetup from "./FlightPathPlayerSetup";
@@ -24,88 +21,46 @@ type AppState =
   | "flight-log";
 
 export default function FlightPathApp() {
-  const [
-    appState,
-    setAppState,
-  ] =
-    useState<AppState>(
-      "loading"
-    );
+  const [appState, setAppState] =
+    useState<AppState>("loading");
 
-  const [
-    playerId,
-    setPlayerId,
-  ] =
-    useState<string | null>(
-      null
-    );
+  const [playerId, setPlayerId] =
+    useState<string | null>(null);
 
-  const [
-    completedGameId,
-    setCompletedGameId,
-  ] =
-    useState<string | null>(
-      null
-    );
+  const [completedGameId, setCompletedGameId] =
+    useState<string | null>(null);
 
   async function checkAccount() {
     const {
       data: { user },
-    } =
-      await supabase.auth.getUser();
+    } = await supabase.auth.getUser();
 
     if (!user) {
       setPlayerId(null);
       setCompletedGameId(null);
       setAppState("signed-out");
-
       return;
     }
 
-    const {
-      data: access,
-      error,
-    } =
-      await supabase
-        .from(
-          "flight_player_access"
-        )
-        .select("player_id")
-        .eq(
-          "user_id",
-          user.id
-        )
-        .limit(1);
+    const { data: access, error } = await supabase
+      .from("flight_player_access")
+      .select("player_id")
+      .eq("user_id", user.id)
+      .limit(1);
 
     if (error) {
-      console.error(error);
-
+      console.error("Could not load player access:", error);
       setPlayerId(null);
-
-      setAppState(
-        "needs-player"
-      );
-
+      setAppState("needs-player");
       return;
     }
 
-    if (
-      access &&
-      access.length > 0
-    ) {
-      setPlayerId(
-        access[0].player_id
-      );
-
-      setAppState(
-        "has-player"
-      );
+    if (access && access.length > 0) {
+      setPlayerId(access[0].player_id);
+      setAppState("has-player");
     } else {
       setPlayerId(null);
-
-      setAppState(
-        "needs-player"
-      );
+      setAppState("needs-player");
     }
   }
 
@@ -113,63 +68,35 @@ export default function FlightPathApp() {
     checkAccount();
 
     const {
-      data: {
-        subscription,
-      },
-    } =
-      supabase.auth.onAuthStateChange(
-        () => {
-          checkAccount();
-        }
-      );
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      checkAccount();
+    });
 
     return () => {
       subscription.unsubscribe();
     };
   }, []);
 
-  if (
-    appState ===
-    "loading"
-  ) {
+  if (appState === "loading") {
     return (
       <main
         style={{
-          minHeight:
-            "100vh",
-
-          background:
-            "#050505",
-
-          color:
-            "#ffffff",
-
-          display:
-            "flex",
-
-          alignItems:
-            "center",
-
-          justifyContent:
-            "center",
-
-          fontFamily:
-            "Arial, Helvetica, sans-serif",
+          minHeight: "100vh",
+          background: "#050505",
+          color: "#ffffff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "Arial, Helvetica, sans-serif",
         }}
       >
         <div
           style={{
-            fontSize:
-              "11px",
-
-            letterSpacing:
-              "0.24em",
-
-            color:
-              "#777777",
-
-            fontWeight:
-              800,
+            fontSize: "11px",
+            letterSpacing: "0.24em",
+            color: "#777777",
+            fontWeight: 800,
           }}
         >
           LOADING FLIGHT PATH...
@@ -178,160 +105,93 @@ export default function FlightPathApp() {
     );
   }
 
-  if (
-    appState ===
-    "signed-out"
-  ) {
+  if (appState === "signed-out") {
     return (
       <FlightPathAuth
-        onSignedIn={
-          checkAccount
-        }
+        onSignedIn={checkAccount}
       />
     );
   }
 
-  if (
-    appState ===
-    "needs-player"
-  ) {
+  if (appState === "needs-player") {
     return (
       <FlightPathPlayerSetup
-        onPlayerCreated={(
-          createdPlayerId
-        ) => {
-          setPlayerId(
-            createdPlayerId
-          );
-
-          setAppState(
-            "has-player"
-          );
+        onPlayerCreated={(createdPlayerId) => {
+          setPlayerId(createdPlayerId);
+          setAppState("has-player");
         }}
       />
     );
   }
 
   if (
-    appState ===
-      "has-player" &&
+    appState === "has-player" &&
     playerId
   ) {
     return (
       <FlightPathPlayerHome
-        playerId={
-          playerId
-        }
-
+        playerId={playerId}
         onStartGame={() =>
-          setAppState(
-            "tracking-game"
-          )
+          setAppState("tracking-game")
         }
-
         onOpenLog={() =>
-          setAppState(
-            "flight-log"
-          )
+          setAppState("flight-log")
         }
       />
     );
   }
 
   if (
-    appState ===
-      "flight-log" &&
+    appState === "flight-log" &&
     playerId
   ) {
     return (
       <FlightPathLog
-        playerId={
-          playerId
-        }
-
+        playerId={playerId}
         onHome={() =>
-          setAppState(
-            "has-player"
-          )
+          setAppState("has-player")
         }
-
         onTrackGame={() =>
-          setAppState(
-            "tracking-game"
-          )
+          setAppState("tracking-game")
         }
-
-        onOpenGame={(
-          gameId
-        ) => {
-          setCompletedGameId(
-            gameId
-          );
-
-          setAppState(
-            "postgame"
-          );
+        onOpenGame={(gameId) => {
+          setCompletedGameId(gameId);
+          setAppState("postgame");
         }}
       />
     );
   }
 
   if (
-    appState ===
-      "tracking-game" &&
+    appState === "tracking-game" &&
     playerId
   ) {
     return (
       <GameTracker
-        playerId={
-          playerId
-        }
-
+        playerId={playerId}
         onExitGame={() =>
-          setAppState(
-            "has-player"
-          )
+          setAppState("has-player")
         }
-
-        onGameSaved={(
-          gameId
-        ) => {
-          setCompletedGameId(
-            gameId
-          );
-
-          setAppState(
-            "postgame"
-          );
+        onGameSaved={(gameId) => {
+          setCompletedGameId(gameId);
+          setAppState("postgame");
         }}
       />
     );
   }
 
   if (
-    appState ===
-      "postgame" &&
+    appState === "postgame" &&
     playerId &&
     completedGameId
   ) {
     return (
       <FlightPathPostgameRecap
-        playerId={
-          playerId
-        }
-
-        gameId={
-          completedGameId
-        }
-
+        playerId={playerId}
+        gameId={completedGameId}
         onHome={() => {
-          setCompletedGameId(
-            null
-          );
-
-          setAppState(
-            "has-player"
-          );
+          setCompletedGameId(null);
+          setAppState("has-player");
         }}
       />
     );
