@@ -1,5 +1,5 @@
 "use client";
-
+import FlightLevelMark from "./FlightLevelMark";
 import { FormEvent, useState } from "react";
 import { supabase } from "../lib/supabase";
 
@@ -72,8 +72,8 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
   }
 
   return (
-    <main className="fpAuthPage">
-      <section className="fpAuthShell">
+    <main className="AuthPage">
+      <section className="AuthShell">
         <header className="fpBrand">
           <div className="fpAcademy">THE FLY ACADEMY</div>
 
@@ -86,34 +86,37 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
             TRACK <span>YOUR</span> GAME. SEE <span>YOUR</span> JOURNEY.
           </div>
         </header>
+<section className="fpJourney">
+  <FlightLevelMark
+    level="elevate"
+    showName
+    size="md"
+  />
 
-        <section className="fpJourney">
-          <div className="fpLevel fpElevate">
-            <div className="fpLevelIcon">⌃</div>
-            <strong>ELEVATE</strong>
-          </div>
+  <div className="fpArrow">→</div>
 
-          <div className="fpArrow">→</div>
+  <FlightLevelMark
+    level="ascend"
+    showName
+    size="md"
+  />
 
-          <div className="fpLevel fpAscend">
-            <div className="fpLevelIcon">⌃</div>
-            <strong>ASCEND</strong>
-          </div>
+  <div className="fpArrow">→</div>
 
-          <div className="fpArrow">→</div>
+  <FlightLevelMark
+    level="air"
+    showName
+    size="md"
+  />
 
-          <div className="fpLevel fpAir">
-            <div className="fpLevelIcon fpAirIcon">➤</div>
-            <strong>AIR</strong>
-          </div>
+  <div className="fpArrow">→</div>
 
-          <div className="fpArrow">→</div>
-
-          <div className="fpLevel fpSelect">
-            <div className="fpLevelIcon fpStar">☆</div>
-            <strong>SELECT</strong>
-          </div>
-        </section>
+  <FlightLevelMark
+    level="select"
+    showName
+    size="md"
+  />
+</section>
 
         <section className="fpIntro">
           <div className="fpEyebrow">
