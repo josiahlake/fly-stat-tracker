@@ -900,29 +900,29 @@ export default function GameTracker({
       }
 
       /* -----------------------------------------------
-         CONSUME CREDIT
-      ----------------------------------------------- */
+   CONSUME CREDIT
+----------------------------------------------- */
 
-      const { error: creditError } = await supabase
-        .from("flight_entitlements")
-        .update({
-          games_used: gamesUsed + 1,
-        })
-        .eq("id", entitlement.id);
+const { error: creditError } = await supabase.rpc(
+  "consume_flight_game_credit",
+  {
+    p_user_id: user.id,
+  }
+);
 
-      if (creditError) {
-        await supabase
-          .from("flight_game_stats")
-          .delete()
-          .eq("game_id", game.id);
+if (creditError) {
+  await supabase
+    .from("flight_game_stats")
+    .delete()
+    .eq("game_id", game.id);
 
-        await supabase
-          .from("flight_games")
-          .delete()
-          .eq("id", game.id);
+  await supabase
+    .from("flight_games")
+    .delete()
+    .eq("id", game.id);
 
-        throw creditError;
-      }
+  throw creditError;
+}
 
       /* -----------------------------------------------
          CLEAR CLOUD DRAFT
