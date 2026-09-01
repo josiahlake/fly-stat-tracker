@@ -1,3 +1,4 @@
+import FlightLevelMark from "./FlightLevelMark";
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -604,18 +605,43 @@ export default function FlightPathPlayerHome({ playerId, onStartGame }: Props) {
           )}
         </section>
 
-        <section className="pathCard">
-          <div className="sectionHeader"><span>YOUR FLIGHT PATH</span></div>
-          <div className="pathLevels">
-            <PathLevel icon="⌃" name="ELEVATE" className={`elevate ${currentLevelClass === "elevate" ? "active" : ""}`} />
-            <div className="pathLine" />
-            <PathLevel icon="⌃" name="ASCEND" className={`ascend ${currentLevelClass === "ascend" ? "active" : ""}`} />
-            <div className="pathLine" />
-            <PathLevel icon="➤" name="AIR" className={`air ${currentLevelClass === "air" ? "active" : ""}`} />
-            <div className="pathLine" />
-            <PathLevel icon="☆" name="SELECT" className={`select ${currentLevelClass === "select" ? "active" : ""}`} />
-          </div>
-        </section>
+<section className="pathCard">
+  <div className="sectionHeader">
+    <span>YOUR FLIGHT PATH</span>
+  </div>
+
+  <div className="pathLevels">
+    <FlightLevelMark
+      level="elevate"
+      showName
+      size="sm"
+    />
+
+    <div className="pathLine" />
+
+    <FlightLevelMark
+      level="ascend"
+      showName
+      size="sm"
+    />
+
+    <div className="pathLine" />
+
+    <FlightLevelMark
+      level="air"
+      showName
+      size="sm"
+    />
+
+    <div className="pathLine" />
+
+    <FlightLevelMark
+      level="select"
+      showName
+      size="sm"
+    />
+  </div>
+</section>
 
         <nav className="bottomNav">
           <NavItem icon="⌂" label="HOME" active />
