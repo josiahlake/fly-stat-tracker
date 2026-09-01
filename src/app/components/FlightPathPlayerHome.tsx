@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 type PlayerHomeData = {
@@ -13,6 +13,7 @@ type PlayerHomeData = {
   gamesTotal: number;
   gamesUsed: number;
 };
+
 type LiveGameDraft = {
   opponentName: string;
   gameDate: string;
@@ -29,6 +30,17 @@ type LiveGameDraft = {
   freeThrowsMade: number;
   freeThrowsAttempted: number;
 };
+
+type CompletedGame = {
+  id: string;
+  gameDate: string;
+  opponentName: string;
+  points: number;
+  rebounds: number;
+  assists: number;
+  steals: number;
+};
+
 type Props = {
   playerId: string;
   onStartGame?: () => void;
@@ -38,12 +50,15 @@ export default function FlightPathPlayerHome({
   playerId,
   onStartGame,
 }: Props) {
-const [data, setData] = useState<PlayerHomeData | null>(null);
-const [liveGame, setLiveGame] = useState<LiveGameDraft | null>(null);
-const [loading, setLoading] = useState(true);
-const [error, setError] = useState("");
+  const [data, setData] = useState<PlayerHomeData | null>(null);
+  const [liveGame, setLiveGame] = useState<LiveGameDraft | null>(null);
+  const [completedGames, setCompletedGames] = useState<CompletedGame[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadPlayerHome() {
       setLoading(true);
       setError("");
@@ -69,6 +84,7 @@ const [error, setError] = useState("");
         const { data: membership, error: membershipError } = await supabase
           .from("flight_team_memberships")
           .select(`
+            id,
             jersey_number,
             teams (
               display_name
@@ -94,74 +110,146 @@ const [error, setError] = useState("");
           .maybeSingle();
 
         if (entitlementError) throw entitlementError;
-const { data: draft, error: draftError } = await supabase
-  .from("flight_game_drafts")
-  .select(`
-    game_date,
-    opponent_name,
-    two_pt_made,
-    two_pt_missed,
-    three_pt_made,
-    three_pt_missed,
-    ft_made,
-    ft_missed,
-    offensive_rebounds,
-    defensive_rebounds,
-    assists,
-    steals,
-    turnovers,
-    fouls
-  `)
-  .eq("player_id", playerId)
-  .eq("user_id", user.id)
-  .maybeSingle();
 
-if (draftError) throw draftError;
+        const { data: draft, error: draftError } = await supabase
+          .from("flight_game_drafts")
+          .select(`
+            game_date,
+            opponent_name,
+            two_pt_made,
+            two_pt_missed,
+            three_pt_made,
+            three_pt_missed,
+            ft_made,
+            ft_missed,
+            offensive_rebounds,
+            defensive_rebounds,
+            assists,
+            steals,
+            turnovers,
+            fouls
+          `)
+          .eq("player_id", playerId)
+          .eq("user_id", user.id)
+          .maybeSingle();
 
-if (draft) {
-  const fgMade =
-    (draft.two_pt_made ?? 0) +
-    (draft.three_pt_made ?? 0);
+        if (draftError) throw draftError;
 
-  const fgAttempts =
-    fgMade +
-    (draft.two_pt_missed ?? 0) +
-    (draft.three_pt_missed ?? 0);
+        const { data: games, error: gamesError } = await supabase
+          .from("flight_games")
+          .select(`
+            id,
+            game_date,
+            opponent_name,
+            created_at
+          `)
+          .eq("player_id", playerId)
+          .order("game_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(50);
 
-  const threeMade = draft.three_pt_made ?? 0;
-  const threeAttempts =
-    threeMade +
-    (draft.three_pt_missed ?? 0);
+        if (gamesError) throw gamesError;
 
-  const ftMade = draft.ft_made ?? 0;
-  const ftAttempts =
-    ftMade +
-    (draft.ft_missed ?? 0);
+        let completed: CompletedGame[] = [];
 
-  setLiveGame({
-    opponentName: draft.opponent_name || "Opponent",
-    gameDate: draft.game_date || "",
-    points:
-      ((draft.two_pt_made ?? 0) * 2) +
-      ((draft.three_pt_made ?? 0) * 3) +
-      (draft.ft_made ?? 0),
-    rebounds:
-      (draft.offensive_rebounds ?? 0) +
-      (draft.defensive_rebounds ?? 0),
-    assists: draft.assists ?? 0,
-    steals: draft.steals ?? 0,
-    turnovers: draft.turnovers ?? 0,
-    fouls: draft.fouls ?? 0,
-    fieldGoalsMade: fgMade,
-    fieldGoalsAttempted: fgAttempts,
-    threePointersMade: threeMade,
-    threePointersAttempted: threeAttempts,
-    freeThrowsMade: ftMade,
-    freeThrowsAttempted: ftAttempts,
-  });
-} else {
-  setLiveGame(null);
-}
+        if (games && games.length > 0) {
+          const gameIds = games.map((game) => game.id);
+
+          const { data: stats, error: statsError } = await supabase
+            .from("flight_game_stats")
+            .select(`
+              game_id,
+              two_pt_made,
+              two_pt_missed,
+              three_pt_made,
+              three_pt_missed,
+              ft_made,
+              ft_missed,
+              rebounds,
+              assists,
+              steals,
+              turnovers,
+              fouls
+            `)
+            .in("game_id", gameIds);
+
+          if (statsError) throw statsError;
+
+          const statsByGame = new Map(
+            (stats ?? []).map((stat) => [stat.game_id, stat])
+          );
+
+          completed = games.map((game) => {
+            const stat = statsByGame.get(game.id);
+
+            const points =
+              (stat?.two_pt_made ?? 0) * 2 +
+              (stat?.three_pt_made ?? 0) * 3 +
+              (stat?.ft_made ?? 0);
+
+            return {
+              id: game.id,
+              gameDate: game.game_date,
+              opponentName: game.opponent_name || "Opponent",
+              points,
+              rebounds: stat?.rebounds ?? 0,
+              assists: stat?.assists ?? 0,
+              steals: stat?.steals ?? 0,
+            };
+          });
+        }
+
+        if (cancelled) return;
+
+        if (draft) {
+          const fgMade =
+            (draft.two_pt_made ?? 0) +
+            (draft.three_pt_made ?? 0);
+
+          const fgAttempts =
+            fgMade +
+            (draft.two_pt_missed ?? 0) +
+            (draft.three_pt_missed ?? 0);
+
+          const threeMade = draft.three_pt_made ?? 0;
+
+          const threeAttempts =
+            threeMade +
+            (draft.three_pt_missed ?? 0);
+
+          const ftMade = draft.ft_made ?? 0;
+
+          const ftAttempts =
+            ftMade +
+            (draft.ft_missed ?? 0);
+
+          setLiveGame({
+            opponentName: draft.opponent_name || "Opponent",
+            gameDate: draft.game_date || "",
+            points:
+              (draft.two_pt_made ?? 0) * 2 +
+              (draft.three_pt_made ?? 0) * 3 +
+              (draft.ft_made ?? 0),
+            rebounds:
+              (draft.offensive_rebounds ?? 0) +
+              (draft.defensive_rebounds ?? 0),
+            assists: draft.assists ?? 0,
+            steals: draft.steals ?? 0,
+            turnovers: draft.turnovers ?? 0,
+            fouls: draft.fouls ?? 0,
+            fieldGoalsMade: fgMade,
+            fieldGoalsAttempted: fgAttempts,
+            threePointersMade: threeMade,
+            threePointersAttempted: threeAttempts,
+            freeThrowsMade: ftMade,
+            freeThrowsAttempted: ftAttempts,
+          });
+        } else {
+          setLiveGame(null);
+        }
+
+        setCompletedGames(completed);
+
         setData({
           playerId: player.id,
           firstName: player.first_name,
@@ -171,23 +259,54 @@ if (draft) {
             (membership?.teams as { display_name?: string } | null)
               ?.display_name ?? null,
           seasonName:
-            (membership?.seasons as { name?: string } | null)?.name ?? null,
+            (membership?.seasons as { name?: string } | null)
+              ?.name ?? null,
           gamesTotal: entitlement?.games_total ?? 0,
           gamesUsed: entitlement?.games_used ?? 0,
         });
       } catch (err) {
+        if (cancelled) return;
+
+        console.error("Unable to load Flight Path home:", err);
+
         setError(
           err instanceof Error
             ? err.message
             : "Unable to load Flight Path."
         );
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     loadPlayerHome();
+
+    return () => {
+      cancelled = true;
+    };
   }, [playerId]);
+
+  const summary = useMemo(() => {
+    const games = completedGames.length;
+
+    const totalPoints = completedGames.reduce(
+      (sum, game) => sum + game.points,
+      0
+    );
+
+    const totalRebounds = completedGames.reduce(
+      (sum, game) => sum + game.rebounds,
+      0
+    );
+
+    return {
+      games,
+      ppg: games ? totalPoints / games : 0,
+      rpg: games ? totalRebounds / games : 0,
+    };
+  }, [completedGames]);
 
   if (loading) {
     return (
@@ -238,7 +357,10 @@ if (draft) {
     );
   }
 
-  const gamesRemaining = Math.max(data.gamesTotal - data.gamesUsed, 0);
+  const gamesRemaining = Math.max(
+    data.gamesTotal - data.gamesUsed,
+    0
+  );
 
   return (
     <main
@@ -292,6 +414,7 @@ if (draft) {
           </div>
         </header>
 
+        {/* PLAYER CARD */}
         <div
           style={{
             border: "1px solid #292929",
@@ -323,7 +446,9 @@ if (draft) {
             }}
           >
             {data.firstName} {data.lastName}
-            {data.jerseyNumber ? ` · #${data.jerseyNumber}` : ""}
+            {data.jerseyNumber
+              ? ` · #${data.jerseyNumber}`
+              : ""}
           </h1>
 
           <div
@@ -335,196 +460,215 @@ if (draft) {
             }}
           >
             {data.teamName ?? "No team assigned"}
-            {data.seasonName ? ` · ${data.seasonName}` : ""}
+            {data.seasonName
+              ? ` · ${data.seasonName}`
+              : ""}
           </div>
         </div>
 
+        {/* LIVE GAME OR ACCESS */}
         {liveGame ? (
-  <div
-    style={{
-      border: "1px solid #343434",
-      borderRadius: "24px",
-      padding: "26px",
-      background: "#101010",
-      marginBottom: "16px",
-    }}
-  >
-    <div
-      style={{
-        color: "#8f8f8f",
-        fontSize: "10px",
-        letterSpacing: "0.18em",
-        fontWeight: 800,
-        marginBottom: "10px",
-      }}
-    >
-      GAME IN PROGRESS
-    </div>
-
-    <div
-      style={{
-        fontSize: "24px",
-        fontWeight: 900,
-        marginBottom: "5px",
-      }}
-    >
-      vs. {liveGame.opponentName}
-    </div>
-
-    <div
-      style={{
-        color: "#888888",
-        fontSize: "13px",
-        marginBottom: "22px",
-      }}
-    >
-      Your live game is automatically saved.
-    </div>
-
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(4, 1fr)",
-        gap: "8px",
-        marginBottom: "14px",
-      }}
-    >
-      {[
-        ["PTS", liveGame.points],
-        ["REB", liveGame.rebounds],
-        ["AST", liveGame.assists],
-        ["STL", liveGame.steals],
-      ].map(([label, value]) => (
-        <div
-          key={label}
-          style={{
-            border: "1px solid #292929",
-            borderRadius: "14px",
-            padding: "13px 10px",
-            background: "#0a0a0a",
-          }}
-        >
           <div
             style={{
-              color: "#777777",
-              fontSize: "8px",
-              letterSpacing: "0.14em",
-              fontWeight: 800,
-              marginBottom: "6px",
+              border: "1px solid #343434",
+              borderRadius: "24px",
+              padding: "26px",
+              background: "#101010",
+              marginBottom: "16px",
             }}
           >
-            {label}
-          </div>
+            <div
+              style={{
+                color: "#8f8f8f",
+                fontSize: "10px",
+                letterSpacing: "0.18em",
+                fontWeight: 800,
+                marginBottom: "10px",
+              }}
+            >
+              GAME IN PROGRESS
+            </div>
 
+            <div
+              style={{
+                fontSize: "24px",
+                fontWeight: 900,
+                marginBottom: "5px",
+              }}
+            >
+              vs. {liveGame.opponentName}
+            </div>
+
+            {liveGame.gameDate && (
+              <div
+                style={{
+                  color: "#707070",
+                  fontSize: "12px",
+                  marginBottom: "8px",
+                }}
+              >
+                {liveGame.gameDate}
+              </div>
+            )}
+
+            <div
+              style={{
+                color: "#888888",
+                fontSize: "13px",
+                marginBottom: "22px",
+              }}
+            >
+              Your live game is automatically saved.
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, 1fr)",
+                gap: "8px",
+                marginBottom: "14px",
+              }}
+            >
+              {[
+                ["PTS", liveGame.points],
+                ["REB", liveGame.rebounds],
+                ["AST", liveGame.assists],
+                ["STL", liveGame.steals],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  style={{
+                    border: "1px solid #292929",
+                    borderRadius: "14px",
+                    padding: "13px 10px",
+                    background: "#0a0a0a",
+                  }}
+                >
+                  <div
+                    style={{
+                      color: "#777777",
+                      fontSize: "8px",
+                      letterSpacing: "0.14em",
+                      fontWeight: 800,
+                      marginBottom: "6px",
+                    }}
+                  >
+                    {label}
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: "20px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    {value}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div
+              style={{
+                color: "#999999",
+                fontSize: "12px",
+                lineHeight: 1.6,
+                marginBottom: "20px",
+              }}
+            >
+              FG {liveGame.fieldGoalsMade}-
+              {liveGame.fieldGoalsAttempted}
+              {" · "}
+              3PT {liveGame.threePointersMade}-
+              {liveGame.threePointersAttempted}
+              {" · "}
+              FT {liveGame.freeThrowsMade}-
+              {liveGame.freeThrowsAttempted}
+            </div>
+
+            <button
+              type="button"
+              onClick={onStartGame}
+              style={{
+                width: "100%",
+                border: "none",
+                borderRadius: "14px",
+                padding: "17px",
+                background: "#ffffff",
+                color: "#000000",
+                fontSize: "15px",
+                fontWeight: 900,
+                cursor: "pointer",
+              }}
+            >
+              RESUME GAME →
+            </button>
+          </div>
+        ) : (
           <div
             style={{
-              fontSize: "20px",
-              fontWeight: 900,
+              border: "1px solid #292929",
+              borderRadius: "24px",
+              padding: "26px",
+              background: "#0d0d0d",
+              marginBottom: "16px",
             }}
           >
-            {value}
+            <div
+              style={{
+                color: "#777777",
+                fontSize: "10px",
+                letterSpacing: "0.18em",
+                fontWeight: 800,
+                marginBottom: "8px",
+              }}
+            >
+              YOUR ACCESS
+            </div>
+
+            <div
+              style={{
+                fontSize: "30px",
+                fontWeight: 900,
+                marginBottom: "4px",
+              }}
+            >
+              {gamesRemaining}
+            </div>
+
+            <div
+              style={{
+                color: "#a0a0a0",
+                fontSize: "14px",
+                marginBottom: "22px",
+              }}
+            >
+              {gamesRemaining === 1
+                ? "free game remaining"
+                : "free games remaining"}
+            </div>
+
+            <button
+              type="button"
+              onClick={onStartGame}
+              style={{
+                width: "100%",
+                border: "none",
+                borderRadius: "14px",
+                padding: "17px",
+                background: "#ffffff",
+                color: "#000000",
+                fontSize: "15px",
+                fontWeight: 900,
+                cursor: "pointer",
+              }}
+            >
+              START GAME →
+            </button>
           </div>
-        </div>
-      ))}
-    </div>
+        )}
 
-    <div
-      style={{
-        color: "#999999",
-        fontSize: "12px",
-        lineHeight: 1.6,
-        marginBottom: "20px",
-      }}
-    >
-      FG {liveGame.fieldGoalsMade}-{liveGame.fieldGoalsAttempted}
-      {" · "}
-      3PT {liveGame.threePointersMade}-{liveGame.threePointersAttempted}
-      {" · "}
-      FT {liveGame.freeThrowsMade}-{liveGame.freeThrowsAttempted}
-    </div>
-
-    <button
-      type="button"
-      onClick={onStartGame}
-      style={{
-        width: "100%",
-        border: "none",
-        borderRadius: "14px",
-        padding: "17px",
-        background: "#ffffff",
-        color: "#000000",
-        fontSize: "15px",
-        fontWeight: 900,
-        cursor: "pointer",
-      }}
-    >
-      RESUME GAME →
-    </button>
-  </div>
-) : (
-  <div
-    style={{
-      border: "1px solid #292929",
-      borderRadius: "24px",
-      padding: "26px",
-      background: "#0d0d0d",
-      marginBottom: "16px",
-    }}
-  >
-    <div
-      style={{
-        color: "#777777",
-        fontSize: "10px",
-        letterSpacing: "0.18em",
-        fontWeight: 800,
-        marginBottom: "8px",
-      }}
-    >
-      YOUR ACCESS
-    </div>
-
-    <div
-      style={{
-        fontSize: "30px",
-        fontWeight: 900,
-        marginBottom: "4px",
-      }}
-    >
-      {gamesRemaining}
-    </div>
-
-    <div
-      style={{
-        color: "#a0a0a0",
-        fontSize: "14px",
-        marginBottom: "22px",
-      }}
-    >
-      {gamesRemaining === 1
-        ? "free game remaining"
-        : "free games remaining"}
-    </div>
-
-    <button
-      type="button"
-      onClick={onStartGame}
-      style={{
-        width: "100%",
-        border: "none",
-        borderRadius: "14px",
-        padding: "17px",
-        background: "#ffffff",
-        color: "#000000",
-        fontSize: "15px",
-        fontWeight: 900,
-        cursor: "pointer",
-      }}
-    >
-      START GAME →
-    </button>
-  </div>
-)}
-
+        {/* SUMMARY */}
         <div
           style={{
             display: "grid",
@@ -534,9 +678,9 @@ if (draft) {
           }}
         >
           {[
-            ["GAMES", "0"],
-            ["PPG", "0.0"],
-            ["RPG", "0.0"],
+            ["GAMES", summary.games.toString()],
+            ["PPG", summary.ppg.toFixed(1)],
+            ["RPG", summary.rpg.toFixed(1)],
           ].map(([label, value]) => (
             <div
               key={label}
@@ -571,6 +715,7 @@ if (draft) {
           ))}
         </div>
 
+        {/* RECENT GAMES */}
         <div
           style={{
             border: "1px solid #292929",
@@ -586,23 +731,84 @@ if (draft) {
               fontSize: "10px",
               letterSpacing: "0.18em",
               fontWeight: 800,
-              marginBottom: "12px",
+              marginBottom: "14px",
             }}
           >
             RECENT GAMES
           </div>
 
-          <div
-            style={{
-              color: "#9a9a9a",
-              fontSize: "14px",
-              lineHeight: 1.5,
-            }}
-          >
-            No games tracked yet.
-          </div>
+          {completedGames.length === 0 ? (
+            <div
+              style={{
+                color: "#9a9a9a",
+                fontSize: "14px",
+                lineHeight: 1.5,
+              }}
+            >
+              No games tracked yet.
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+              }}
+            >
+              {completedGames.slice(0, 5).map((game) => (
+                <div
+                  key={game.id}
+                  style={{
+                    border: "1px solid #252525",
+                    borderRadius: "16px",
+                    padding: "15px",
+                    background: "#090909",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      alignItems: "baseline",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 800,
+                      }}
+                    >
+                      vs. {game.opponentName}
+                    </div>
+
+                    <div
+                      style={{
+                        color: "#707070",
+                        fontSize: "11px",
+                      }}
+                    >
+                      {game.gameDate}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "8px",
+                      color: "#9a9a9a",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {game.points} PTS · {game.rebounds} REB ·{" "}
+                    {game.assists} AST · {game.steals} STL
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
+        {/* FLIGHT PATH */}
         <div
           style={{
             border: "1px solid #292929",
