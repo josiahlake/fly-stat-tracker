@@ -1,505 +1,521 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
 import { supabase } from "../lib/supabase";
 
 /* =========================================================
-   FLIGHT PATH — LIVE GAME TRACKER
-   ========================================================= */
+   TYPES
+========================================================= */
 
 type LiveCounts = {
   made2: number;
   miss2: number;
+
   made3: number;
   miss3: number;
+
   madeFT: number;
   missFT: number;
 
-  orb: number;
-  drb: number;
+  reb: number;
   ast: number;
   to: number;
   stl: number;
+  blk: number;
   pf: number;
 };
 
-type Action =
-  | { kind: "inc"; key: keyof LiveCounts }
-  | { kind: "dec"; key: keyof LiveCounts };
-
-type GameDraft = {
-  updatedAt: number;
-  date: string;
-  opponent: string;
-  notes: string;
-  counts: LiveCounts;
+type Action = {
+  key: keyof LiveCounts;
 };
 
 type PlayerContext = {
   firstName: string;
   lastName: string;
-  fullName: string;
 
-  jerseyNumber: string;
-  teamName: string;
-  seasonName: string;
+  jerseyNumber: string | null;
+
+  teamName: string | null;
+  seasonName: string | null;
 
   membershipId: string | null;
 };
 
+type GameDraft = {
+  updatedAt: number;
+
+  date: string;
+  opponent: string;
+  notes: string;
+
+  counts: LiveCounts;
+
+  playingSeconds: number;
+
+  isInGame: boolean;
+  liveSegmentStartedAt: number | null;
+
+  flyScore: string;
+  opponentScore: string;
+};
+
 type GameTrackerProps = {
   playerId: string;
+
   onGameSaved?: () => void;
   onExitGame?: () => void;
 };
 
-type SaveState = "saved" | "saving" | "error";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
 
 const emptyCounts: LiveCounts = {
   made2: 0,
   miss2: 0,
+
   made3: 0,
   miss3: 0,
+
   madeFT: 0,
   missFT: 0,
-  orb: 0,
-  drb: 0,
+
+  reb: 0,
   ast: 0,
   to: 0,
   stl: 0,
+  blk: 0,
   pf: 0,
 };
 
+
 /* =========================================================
    HELPERS
-   ========================================================= */
+========================================================= */
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
+
 function todayISO() {
   const d = new Date();
 
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(
-    d.getDate()
-  )}`;
+  return `${d.getFullYear()}-${pad2(
+    d.getMonth() + 1
+  )}-${pad2(d.getDate())}`;
 }
 
-function pct(made: number, attempts: number) {
-  if (!attempts) return 0;
-  return (made / attempts) * 100;
+
+function clampNonNeg(n: number) {
+  return Math.max(0, n);
 }
 
-function formatPct(value: number) {
-  return `${value.toFixed(1)}%`;
+
+function formatClock(totalSeconds: number) {
+  const safe = Math.max(
+    0,
+    Math.floor(totalSeconds)
+  );
+
+  const minutes = Math.floor(
+    safe / 60
+  );
+
+  const seconds = safe % 60;
+
+  return `${minutes}:${pad2(seconds)}`;
 }
 
-function clampNonNeg(value: number) {
-  return Math.max(0, value);
-}
-
-function formatPlayerName(firstName: string, lastName: string) {
-  return `${firstName || ""} ${lastName || ""}`.trim();
-}
-
-function hasAnyStats(counts: LiveCounts) {
-  return Object.values(counts).some((value) => Number(value) > 0);
-}
 
 /* =========================================================
-   SMALL UI COMPONENTS
-   ========================================================= */
-
-function StatTile({
-  label,
-  value,
-  detail,
-}: {
-  label: string;
-  value: React.ReactNode;
-  detail?: string;
-}) {
-  return (
-    <div className="fpStatTile">
-      <div className="fpStatLabel">{label}</div>
-      <div className="fpStatValue">{value}</div>
-
-      {detail ? <div className="fpStatDetail">{detail}</div> : null}
-    </div>
-  );
-}
-
-function TapButton({
-  id,
-  activeId,
-  onTap,
-  title,
-  subtitle,
-  variant,
-}: {
-  id: string;
-  activeId: string | null;
-  onTap: () => void;
-  title: string;
-  subtitle: string;
-  variant: "make" | "miss" | "neutral";
-}) {
-  const className = [
-    "fpTapButton",
-    variant === "make" ? "fpTapMake" : "",
-    variant === "miss" ? "fpTapMiss" : "",
-    variant === "neutral" ? "fpTapNeutral" : "",
-    activeId === id ? "fpTapActive" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    <button className={className} type="button" onClick={onTap}>
-      <div className="fpTapTitle">{title}</div>
-      <div className="fpTapSubtitle">{subtitle}</div>
-    </button>
-  );
-}
-
-/* =========================================================
-   TRACKER
-   ========================================================= */
+   COMPONENT
+========================================================= */
 
 export default function GameTracker({
   playerId,
   onGameSaved,
   onExitGame,
 }: GameTrackerProps) {
-  /* ---------------------------------------------------------
+
+  /* -------------------------------------------------------
      PLAYER
-     --------------------------------------------------------- */
+  ------------------------------------------------------- */
 
-  const [player, setPlayer] = useState<PlayerContext>({
-    firstName: "",
-    lastName: "",
-    fullName: "",
-    jerseyNumber: "",
-    teamName: "",
-    seasonName: "",
-    membershipId: null,
-  });
+  const [player, setPlayer] =
+    useState<PlayerContext | null>(null);
 
-  const [playerLoading, setPlayerLoading] = useState(true);
-  const [playerError, setPlayerError] = useState("");
+  const [playerLoading, setPlayerLoading] =
+    useState(true);
 
-  /* ---------------------------------------------------------
+  const [playerError, setPlayerError] =
+    useState("");
+
+
+  /* -------------------------------------------------------
      GAME
-     --------------------------------------------------------- */
+  ------------------------------------------------------- */
 
-  const [date, setDate] = useState(todayISO());
-  const [opponent, setOpponent] = useState("");
-  const [notes, setNotes] = useState("");
+  const [date, setDate] =
+    useState(todayISO());
 
-  const [counts, setCounts] = useState<LiveCounts>({
-    ...emptyCounts,
-  });
+  const [opponent, setOpponent] =
+    useState("");
 
-  /* ---------------------------------------------------------
-     UI STATE
-     --------------------------------------------------------- */
+  const [notes, setNotes] =
+    useState("");
 
-  const [history, setHistory] = useState<Action[]>([]);
-  const [lastTapId, setLastTapId] = useState<string | null>(null);
+  const [flyScore, setFlyScore] =
+    useState("");
 
-  const [vibOn, setVibOn] = useState(true);
+  const [
+    opponentScore,
+    setOpponentScore,
+  ] = useState("");
 
-  const [draftReady, setDraftReady] = useState(false);
-  const [saveState, setSaveState] = useState<SaveState>("saved");
-  const [manualSaveMessage, setManualSaveMessage] = useState("");
 
-  const [finalizing, setFinalizing] = useState(false);
+  /* -------------------------------------------------------
+     STATS
+  ------------------------------------------------------- */
+
+  const [counts, setCounts] =
+    useState<LiveCounts>({
+      ...emptyCounts,
+    });
+
+  const [history, setHistory] =
+    useState<Action[]>([]);
+
+  const [
+    lastTapId,
+    setLastTapId,
+  ] = useState<string | null>(null);
+
+
+  /* -------------------------------------------------------
+     PLAYING TIME
+  ------------------------------------------------------- */
+
+  const [
+    playingSeconds,
+    setPlayingSeconds,
+  ] = useState(0);
+
+  const [
+    isInGame,
+    setIsInGame,
+  ] = useState(false);
+
+  const [
+    liveSegmentStartedAt,
+    setLiveSegmentStartedAt,
+  ] = useState<number | null>(null);
+
+  const [
+    displayedPlayingSeconds,
+    setDisplayedPlayingSeconds,
+  ] = useState(0);
+
+
+  /* -------------------------------------------------------
+     SAVE STATES
+  ------------------------------------------------------- */
+
+  const [
+    draftReady,
+    setDraftReady,
+  ] = useState(false);
+
+  const [
+    saveState,
+    setSaveState,
+  ] = useState<
+    | "idle"
+    | "saving"
+    | "saved"
+    | "error"
+  >("idle");
+
+  const [
+    finalizing,
+    setFinalizing,
+  ] = useState(false);
+
+  const [
+    vibOn,
+    setVibOn,
+  ] = useState(true);
+
+
+  /* -------------------------------------------------------
+     REFS
+  ------------------------------------------------------- */
 
   const draftTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(null);
+    useRef<
+      ReturnType<typeof setTimeout> | null
+    >(null);
 
-  const tapTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveStatusTimerRef =
+    useRef<
+      ReturnType<typeof setTimeout> | null
+    >(null);
 
-  const messageTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(null);
+  const DRAFT_KEY =
+    `flightPath.gameDraft.${playerId}`;
 
-  const DRAFT_KEY = `flightPath.gameDraft.${playerId}`;
 
   /* =========================================================
      LOAD PLAYER CONTEXT
-     ========================================================= */
+  ========================================================= */
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadPlayerContext() {
+    async function loadPlayer() {
       setPlayerLoading(true);
       setPlayerError("");
 
       try {
-        /*
-         * 1. PLAYER PROFILE
-         */
         const {
-          data: playerRow,
-          error: playerQueryError,
+          data: playerRecord,
+          error: playerError,
         } = await supabase
           .from("flight_players")
-          .select("id, first_name, last_name")
+          .select(
+            "id, first_name, last_name"
+          )
           .eq("id", playerId)
           .single();
 
-        if (playerQueryError) {
-          throw playerQueryError;
+        if (playerError) {
+          throw playerError;
         }
 
-        /*
-         * 2. MOST RECENT TEAM MEMBERSHIP
-         */
         const {
-          data: membershipRows,
+          data: membership,
           error: membershipError,
         } = await supabase
-          .from("flight_team_memberships")
-          .select(
-            "id, player_id, team_id, season_id, jersey_number"
+          .from(
+            "flight_team_memberships"
           )
+          .select(`
+            id,
+            jersey_number,
+            teams (
+              display_name
+            ),
+            seasons (
+              name
+            )
+          `)
           .eq("player_id", playerId)
-          .limit(10);
+          .order("created_at", {
+            ascending: false,
+          })
+          .limit(1)
+          .maybeSingle();
 
         if (membershipError) {
-          console.error(
-            "Could not load Flight Path membership:",
-            membershipError
-          );
-        }
-
-        const membership =
-          membershipRows && membershipRows.length > 0
-            ? membershipRows[0]
-            : null;
-
-        let teamName = "";
-        let seasonName = "";
-
-        /*
-         * 3. TEAM
-         */
-        if (membership?.team_id) {
-          const { data: teamRow, error: teamError } =
-            await supabase
-              .from("teams")
-              .select("id, name")
-              .eq("id", membership.team_id)
-              .maybeSingle();
-
-          if (teamError) {
-            console.error(
-              "Could not load Flight Path team:",
-              teamError
-            );
-          }
-
-          teamName = teamRow?.name || "";
-        }
-
-        /*
-         * 4. SEASON
-         */
-        if (membership?.season_id) {
-          const { data: seasonRow, error: seasonError } =
-            await supabase
-              .from("seasons")
-              .select("id, name")
-              .eq("id", membership.season_id)
-              .maybeSingle();
-
-          if (seasonError) {
-            console.error(
-              "Could not load Flight Path season:",
-              seasonError
-            );
-          }
-
-          seasonName = seasonRow?.name || "";
+          throw membershipError;
         }
 
         if (cancelled) return;
 
-        const firstName = playerRow?.first_name || "";
-        const lastName = playerRow?.last_name || "";
-
         setPlayer({
-          firstName,
-          lastName,
+          firstName:
+            playerRecord.first_name ?? "",
 
-          fullName:
-            formatPlayerName(firstName, lastName) || "PLAYER",
+          lastName:
+            playerRecord.last_name ?? "",
 
           jerseyNumber:
-            membership?.jersey_number !== null &&
-            membership?.jersey_number !== undefined
-              ? String(membership.jersey_number)
-              : "",
+            membership?.jersey_number ??
+            null,
 
-          teamName,
-          seasonName,
+          membershipId:
+            membership?.id ?? null,
 
-          membershipId: membership?.id
-            ? String(membership.id)
-            : null,
+          teamName:
+            (
+              membership?.teams as
+                | {
+                    display_name?: string;
+                  }
+                | null
+            )?.display_name ?? null,
+
+          seasonName:
+            (
+              membership?.seasons as
+                | {
+                    name?: string;
+                  }
+                | null
+            )?.name ?? null,
         });
+
       } catch (error) {
+
         console.error(
-          "Could not load Flight Path player context:",
+          "Unable to load player:",
           error
         );
 
         if (!cancelled) {
-          setPlayerError("Unable to load player information.");
+          setPlayerError(
+            "Unable to load player information."
+          );
         }
+
       } finally {
+
         if (!cancelled) {
           setPlayerLoading(false);
         }
       }
     }
 
-    loadPlayerContext();
+    loadPlayer();
 
     return () => {
       cancelled = true;
     };
   }, [playerId]);
 
+
   /* =========================================================
-     RESTORE UNFINISHED GAME
-     ========================================================= */
+     RESTORE LIVE DRAFT
+  ========================================================= */
 
   useEffect(() => {
     let cancelled = false;
 
     async function restoreDraft() {
+
       try {
+
         const {
           data: { user },
-        } = await supabase.auth.getUser();
+        } =
+          await supabase.auth.getUser();
+
+        let localDraft:
+          | GameDraft
+          | null = null;
 
         /*
-         * Read local copy first.
+         * LOCAL COPY
          */
-        let localDraft: GameDraft | null = null;
 
-        if (typeof window !== "undefined") {
+        if (
+          typeof window !== "undefined"
+        ) {
+
           try {
-            const raw = localStorage.getItem(DRAFT_KEY);
+
+            const raw =
+              localStorage.getItem(
+                DRAFT_KEY
+              );
 
             if (raw) {
-              localDraft = JSON.parse(raw) as GameDraft;
+              localDraft =
+                JSON.parse(
+                  raw
+                ) as GameDraft;
             }
+
           } catch (error) {
+
             console.error(
-              "Could not read local Flight Path draft:",
+              "Unable to read local draft:",
               error
             );
           }
         }
 
-        /*
-         * If signed out, local draft can still restore.
-         */
-        if (!user) {
-          if (localDraft && !cancelled) {
-            setDate(localDraft.date || todayISO());
-            setOpponent(localDraft.opponent || "");
-            setNotes(localDraft.notes || "");
-            setCounts({
-              ...emptyCounts,
-              ...localDraft.counts,
-            });
-          }
-
-          if (!cancelled) {
-            setDraftReady(true);
-          }
-
-          return;
-        }
 
         /*
-         * Read cloud draft.
+         * CLOUD COPY
          */
-        const {
-          data: cloudDraft,
-          error: cloudDraftError,
-        } = await supabase
-          .from("flight_game_drafts")
-          .select("*")
-          .eq("player_id", playerId)
-          .eq("user_id", user.id)
-          .maybeSingle();
 
-        if (cloudDraftError) {
-          console.error(
-            "Could not load cloud Flight Path draft:",
-            cloudDraftError
-          );
+        let cloudDraft: any = null;
+
+        if (user) {
+
+          const {
+            data,
+            error,
+          } = await supabase
+            .from(
+              "flight_game_drafts"
+            )
+            .select("*")
+            .eq(
+              "player_id",
+              playerId
+            )
+            .eq(
+              "user_id",
+              user.id
+            )
+            .maybeSingle();
+
+          if (error) {
+
+            console.error(
+              "Unable to load cloud draft:",
+              error
+            );
+
+          } else {
+
+            cloudDraft = data;
+          }
         }
 
         if (cancelled) return;
 
-        const cloudUpdatedAt = cloudDraft?.updated_at
-          ? new Date(cloudDraft.updated_at).getTime()
-          : 0;
-
-        const localUpdatedAt =
-          localDraft?.updatedAt || 0;
 
         /*
-         * Whichever copy is newest wins.
+         * COMPARE TIMESTAMPS
          */
+
+        const cloudUpdatedAt =
+          cloudDraft?.updated_at
+            ? new Date(
+                cloudDraft.updated_at
+              ).getTime()
+            : 0;
+
+        const localUpdatedAt =
+          localDraft?.updatedAt ?? 0;
+
+
+        /*
+         * LOCAL WINS
+         *
+         * Local contains additional UI state:
+         * score + in/out state.
+         */
+
         if (
-          cloudDraft &&
-          cloudUpdatedAt >= localUpdatedAt
+          localDraft &&
+          localUpdatedAt >=
+            cloudUpdatedAt
         ) {
+
           setDate(
-            cloudDraft.game_date || todayISO()
-          );
-
-          setOpponent(
-            cloudDraft.opponent_name || ""
-          );
-
-          setNotes(
-            cloudDraft.game_note || ""
-          );
-
-          setCounts({
-            made2: cloudDraft.two_pt_made ?? 0,
-            miss2: cloudDraft.two_pt_missed ?? 0,
-
-            made3: cloudDraft.three_pt_made ?? 0,
-            miss3: cloudDraft.three_pt_missed ?? 0,
-
-            madeFT: cloudDraft.ft_made ?? 0,
-            missFT: cloudDraft.ft_missed ?? 0,
-
-            orb:
-              cloudDraft.offensive_rebounds ?? 0,
-
-            drb:
-              cloudDraft.defensive_rebounds ?? 0,
-
-            ast: cloudDraft.assists ?? 0,
-            to: cloudDraft.turnovers ?? 0,
-            stl: cloudDraft.steals ?? 0,
-            pf: cloudDraft.fouls ?? 0,
-          });
-        } else if (localDraft) {
-          setDate(
-            localDraft.date || todayISO()
+            localDraft.date ||
+            todayISO()
           );
 
           setOpponent(
@@ -514,13 +530,128 @@ export default function GameTracker({
             ...emptyCounts,
             ...localDraft.counts,
           });
+
+          setPlayingSeconds(
+            localDraft.playingSeconds ??
+              0
+          );
+
+          setIsInGame(
+            localDraft.isInGame ??
+              false
+          );
+
+          setLiveSegmentStartedAt(
+            localDraft.liveSegmentStartedAt ??
+              null
+          );
+
+          setFlyScore(
+            localDraft.flyScore ?? ""
+          );
+
+          setOpponentScore(
+            localDraft.opponentScore ??
+              ""
+          );
+
         }
+
+        /*
+         * CLOUD WINS
+         */
+
+        else if (cloudDraft) {
+
+          setDate(
+            cloudDraft.game_date ||
+              todayISO()
+          );
+
+          setOpponent(
+            cloudDraft.opponent_name ||
+              ""
+          );
+
+          setNotes(
+            cloudDraft.game_note || ""
+          );
+
+          setCounts({
+            made2:
+              cloudDraft.two_pt_made ??
+              0,
+
+            miss2:
+              cloudDraft.two_pt_missed ??
+              0,
+
+            made3:
+              cloudDraft.three_pt_made ??
+              0,
+
+            miss3:
+              cloudDraft.three_pt_missed ??
+              0,
+
+            madeFT:
+              cloudDraft.ft_made ?? 0,
+
+            missFT:
+              cloudDraft.ft_missed ?? 0,
+
+            reb:
+              (
+                cloudDraft.offensive_rebounds ??
+                0
+              ) +
+              (
+                cloudDraft.defensive_rebounds ??
+                0
+              ),
+
+            ast:
+              cloudDraft.assists ?? 0,
+
+            to:
+              cloudDraft.turnovers ?? 0,
+
+            stl:
+              cloudDraft.steals ?? 0,
+
+            blk:
+              cloudDraft.blocks ?? 0,
+
+            pf:
+              cloudDraft.fouls ?? 0,
+          });
+
+          setPlayingSeconds(
+            cloudDraft.playing_seconds ??
+              0
+          );
+
+          /*
+           * Cloud recovery resumes in
+           * SUBBED OUT state for safety.
+           */
+
+          setIsInGame(false);
+
+          setLiveSegmentStartedAt(
+            null
+          );
+        }
+
       } catch (error) {
+
         console.error(
           "Flight Path draft restore failed:",
           error
         );
+
       } finally {
+
         if (!cancelled) {
           setDraftReady(true);
         }
@@ -532,171 +663,76 @@ export default function GameTracker({
     return () => {
       cancelled = true;
     };
-  }, [playerId, DRAFT_KEY]);
 
-  /* =========================================================
-     AUTO-SAVE LIVE GAME
-     ========================================================= */
-
-  useEffect(() => {
-    if (!draftReady) return;
-
-    const now = Date.now();
-
-    const localDraft: GameDraft = {
-      updatedAt: now,
-      date,
-      opponent,
-      notes,
-      counts: { ...counts },
-    };
-
-    /*
-     * SAFETY SAVE #1:
-     * Immediately persist on device after every change.
-     */
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem(
-          DRAFT_KEY,
-          JSON.stringify(localDraft)
-        );
-      } catch (error) {
-        console.error(
-          "Could not save local Flight Path draft:",
-          error
-        );
-      }
-    }
-
-    /*
-     * SAFETY SAVE #2:
-     * Cloud backup after brief debounce.
-     */
-    setSaveState("saving");
-
-    if (draftTimerRef.current) {
-      clearTimeout(draftTimerRef.current);
-    }
-
-    draftTimerRef.current = setTimeout(
-      async () => {
-        try {
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-
-          if (!user) {
-            setSaveState("saved");
-            return;
-          }
-
-          const { error } = await supabase
-            .from("flight_game_drafts")
-            .upsert(
-              {
-                player_id: playerId,
-                user_id: user.id,
-
-                game_date:
-                  date || todayISO(),
-
-                opponent_name:
-                  opponent.trim(),
-
-                game_note:
-                  notes.trim() || null,
-
-                two_pt_made:
-                  counts.made2,
-
-                two_pt_missed:
-                  counts.miss2,
-
-                three_pt_made:
-                  counts.made3,
-
-                three_pt_missed:
-                  counts.miss3,
-
-                ft_made:
-                  counts.madeFT,
-
-                ft_missed:
-                  counts.missFT,
-
-                offensive_rebounds:
-                  counts.orb,
-
-                defensive_rebounds:
-                  counts.drb,
-
-                assists:
-                  counts.ast,
-
-                steals:
-                  counts.stl,
-
-                turnovers:
-                  counts.to,
-
-                blocks: 0,
-
-                fouls:
-                  counts.pf,
-
-                playing_seconds: 0,
-              },
-              {
-                onConflict:
-                  "player_id,user_id",
-              }
-            );
-
-          if (error) {
-            throw error;
-          }
-
-          setSaveState("saved");
-        } catch (error) {
-          console.error(
-            "Flight Path cloud draft sync failed:",
-            error
-          );
-
-          /*
-           * Local copy is still protected.
-           */
-          setSaveState("error");
-        }
-      },
-      400
-    );
-
-    return () => {
-      if (draftTimerRef.current) {
-        clearTimeout(
-          draftTimerRef.current
-        );
-      }
-    };
   }, [
-    draftReady,
     playerId,
     DRAFT_KEY,
-    date,
-    opponent,
-    notes,
-    counts,
   ]);
 
-  /* =========================================================
-     DERIVED GAME STATS
-     ========================================================= */
 
-  const scoring = useMemo(() => {
+  /* =========================================================
+     PLAYING TIME CLOCK
+  ========================================================= */
+
+  useEffect(() => {
+
+    function calculateCurrentTime() {
+
+      let total =
+        playingSeconds;
+
+      if (
+        isInGame &&
+        liveSegmentStartedAt
+      ) {
+
+        total += Math.floor(
+          (
+            Date.now() -
+            liveSegmentStartedAt
+          ) / 1000
+        );
+      }
+
+      setDisplayedPlayingSeconds(
+        total
+      );
+    }
+
+    calculateCurrentTime();
+
+    if (!isInGame) {
+      return;
+    }
+
+    const timer =
+      window.setInterval(
+        calculateCurrentTime,
+        1000
+      );
+
+    return () => {
+      window.clearInterval(
+        timer
+      );
+    };
+
+  }, [
+    playingSeconds,
+    isInGame,
+    liveSegmentStartedAt,
+  ]);
+
+
+  /* =========================================================
+     DERIVED LIVE STATS
+  ========================================================= */
+
+  const liveStats = useMemo(() => {
+
     const fgm =
-      counts.made2 + counts.made3;
+      counts.made2 +
+      counts.made3;
 
     const fga =
       counts.made2 +
@@ -704,403 +740,158 @@ export default function GameTracker({
       counts.made3 +
       counts.miss3;
 
-    const tpm =
-      counts.made3;
-
-    const tpa =
+    const threeAttempts =
       counts.made3 +
       counts.miss3;
 
-    const ftm =
-      counts.madeFT;
-
-    const fta =
+    const ftAttempts =
       counts.madeFT +
       counts.missFT;
 
-    const points =
+    const pts =
       counts.made2 * 2 +
       counts.made3 * 3 +
       counts.madeFT;
 
     return {
-      points,
+      pts,
+
+      reb: counts.reb,
+
+      ast: counts.ast,
+
+      stl: counts.stl,
+
+      to: counts.to,
+
+      blk: counts.blk,
+
+      pf: counts.pf,
+
       fgm,
       fga,
-      fgPct: pct(fgm, fga),
 
-      tpm,
-      tpa,
-      tpPct: pct(tpm, tpa),
+      threeMade:
+        counts.made3,
 
-      ftm,
-      fta,
-      ftPct: pct(ftm, fta),
+      threeAttempts,
+
+      ftMade:
+        counts.madeFT,
+
+      ftAttempts,
     };
+
   }, [counts]);
 
-  const rebounds =
-    counts.orb + counts.drb;
 
   /* =========================================================
-     TAP FEEDBACK
-     ========================================================= */
+     SAVE HELPERS
+  ========================================================= */
 
-  function tapFeedback(id: string) {
-    setLastTapId(id);
-
-    if (tapTimerRef.current) {
-      clearTimeout(tapTimerRef.current);
-    }
-
-    tapTimerRef.current = setTimeout(
-      () => setLastTapId(null),
-      120
-    );
-
-    if (!vibOn) return;
+  function getCurrentPlayingSeconds() {
 
     if (
-      typeof navigator !== "undefined" &&
-      "vibrate" in navigator
+      isInGame &&
+      liveSegmentStartedAt
     ) {
-      try {
-        navigator.vibrate(12);
-      } catch {
-        // iOS Safari generally ignores vibration.
-      }
-    }
-  }
 
-  /* =========================================================
-     STAT ACTIONS
-     ========================================================= */
-
-  function inc(
-    key: keyof LiveCounts,
-    tapId: string
-  ) {
-    tapFeedback(tapId);
-
-    setCounts((current) => ({
-      ...current,
-      [key]: current[key] + 1,
-    }));
-
-    setHistory((current) => [
-      ...current,
-      {
-        kind: "inc",
-        key,
-      },
-    ]);
-  }
-
-  function undo() {
-    setHistory((currentHistory) => {
-      if (!currentHistory.length) {
-        return currentHistory;
-      }
-
-      const last =
-        currentHistory[
-          currentHistory.length - 1
-        ];
-
-      setCounts((currentCounts) => {
-        if (last.kind === "inc") {
-          return {
-            ...currentCounts,
-
-            [last.key]: clampNonNeg(
-              currentCounts[last.key] - 1
-            ),
-          };
-        }
-
-        return {
-          ...currentCounts,
-
-          [last.key]:
-            currentCounts[last.key] + 1,
-        };
-      });
-
-      return currentHistory.slice(0, -1);
-    });
-  }
-
-  function confirmUndo() {
-    if (!history.length) return;
-
-    const confirmed =
-      window.confirm(
-        "Undo your last stat entry?"
+      return (
+        playingSeconds +
+        Math.floor(
+          (
+            Date.now() -
+            liveSegmentStartedAt
+          ) / 1000
+        )
       );
-
-    if (confirmed) {
-      undo();
     }
+
+    return playingSeconds;
   }
 
-  function resetLive() {
-    setCounts({
-      ...emptyCounts,
-    });
 
-    setHistory([]);
+  function makeLocalDraft(): GameDraft {
+
+    return {
+      updatedAt: Date.now(),
+
+      date,
+
+      opponent,
+
+      notes,
+
+      counts: {
+        ...counts,
+      },
+
+      playingSeconds:
+        getCurrentPlayingSeconds(),
+
+      isInGame,
+
+      liveSegmentStartedAt,
+
+      flyScore,
+
+      opponentScore,
+    };
   }
 
-  function confirmReset() {
+
+  function saveLocalDraft() {
+
     if (
-      !hasAnyStats(counts) &&
-      history.length === 0
+      typeof window === "undefined"
     ) {
       return;
     }
 
-    const name =
-      player.fullName || "this player";
-
-    const confirmed =
-      window.confirm(
-        `Clear ${name}'s live game stats?\n\nThis cannot be undone.`
-      );
-
-    if (confirmed) {
-      resetLive();
-    }
-  }
-
-  /* =========================================================
-     MANUAL "SAVE PROGRESS"
-     ========================================================= */
-
-  async function saveProgress() {
     try {
-      setSaveState("saving");
 
-      const now = Date.now();
-
-      const localDraft: GameDraft = {
-        updatedAt: now,
-        date,
-        opponent,
-        notes,
-        counts: { ...counts },
-      };
-
-      /*
-       * Save instantly on this device.
-       */
-      if (typeof window !== "undefined") {
-        localStorage.setItem(
-          DRAFT_KEY,
-          JSON.stringify(localDraft)
-        );
-      }
-
-      /*
-       * Save instantly to cloud.
-       */
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setSaveState("saved");
-        showManualSaveMessage(
-          "Saved on this device."
-        );
-        return;
-      }
-
-      const { error } = await supabase
-        .from("flight_game_drafts")
-        .upsert(
-          {
-            player_id: playerId,
-            user_id: user.id,
-
-            game_date:
-              date || todayISO(),
-
-            opponent_name:
-              opponent.trim(),
-
-            game_note:
-              notes.trim() || null,
-
-            two_pt_made:
-              counts.made2,
-
-            two_pt_missed:
-              counts.miss2,
-
-            three_pt_made:
-              counts.made3,
-
-            three_pt_missed:
-              counts.miss3,
-
-            ft_made:
-              counts.madeFT,
-
-            ft_missed:
-              counts.missFT,
-
-            offensive_rebounds:
-              counts.orb,
-
-            defensive_rebounds:
-              counts.drb,
-
-            assists:
-              counts.ast,
-
-            steals:
-              counts.stl,
-
-            turnovers:
-              counts.to,
-
-            blocks: 0,
-
-            fouls:
-              counts.pf,
-
-            playing_seconds: 0,
-          },
-          {
-            onConflict:
-              "player_id,user_id",
-          }
-        );
-
-      if (error) {
-        throw error;
-      }
-
-      setSaveState("saved");
-
-      showManualSaveMessage(
-        "Progress saved ✓"
+      localStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify(
+          makeLocalDraft()
+        )
       );
+
     } catch (error) {
+
       console.error(
-        "Could not save game progress:",
+        "Unable to save local draft:",
         error
       );
-
-      /*
-       * Their local safety save should still exist.
-       */
-      setSaveState("error");
-
-      showManualSaveMessage(
-        "Saved on device. Cloud backup unavailable."
-      );
     }
   }
 
-  function showManualSaveMessage(
-    message: string
-  ) {
-    setManualSaveMessage(message);
 
-    if (messageTimerRef.current) {
-      clearTimeout(
-        messageTimerRef.current
+  async function saveCloudDraft() {
+
+    const {
+      data: { user },
+    } =
+      await supabase.auth.getUser();
+
+    if (!user) {
+      throw new Error(
+        "Please sign in again."
       );
     }
 
-    messageTimerRef.current =
-      setTimeout(() => {
-        setManualSaveMessage("");
-      }, 2400);
-  }
+    const {
+      error,
+    } = await supabase
+      .from(
+        "flight_game_drafts"
+      )
+      .upsert(
+        {
+          player_id:
+            playerId,
 
-  /* =========================================================
-     EXIT WITHOUT ENDING GAME
-     ========================================================= */
-
-  async function exitGame() {
-    /*
-     * Force a safety save before leaving.
-     */
-    await saveProgress();
-
-    if (onExitGame) {
-      onExitGame();
-    }
-  }
-
-  /* =========================================================
-     FINALIZE GAME
-     ========================================================= */
-
-  async function finalizeGame() {
-    if (finalizing) return;
-
-    if (!player.fullName) {
-      alert(
-        "We couldn't load the player profile. Please return to Flight Path and try again."
-      );
-      return;
-    }
-
-    if (!player.membershipId) {
-      alert(
-        "We couldn't identify this player's current team membership. Please return to Flight Path and try again."
-      );
-      return;
-    }
-
-    if (!opponent.trim()) {
-      alert(
-        "Please enter the opponent before finalizing the game."
-      );
-      return;
-    }
-
-    const confirmed =
-      window.confirm(
-        `Finalize ${player.fullName}'s game vs. ${opponent.trim()}?\n\nThe stats will be added to this player's Flight Path.`
-      );
-
-    if (!confirmed) return;
-
-    setFinalizing(true);
-
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        throw new Error(
-          "You are no longer signed in."
-        );
-      }
-
-      /*
-       * -------------------------------------------------------
-       * 1. CREATE COMPLETED GAME
-       * -------------------------------------------------------
-       */
-
-      const {
-        data: gameRow,
-        error: gameError,
-      } = await supabase
-        .from("flight_games")
-        .insert({
-          player_id: playerId,
-
-          team_membership_id:
-            player.membershipId,
-
-          created_by:
+          user_id:
             user.id,
 
           game_date:
@@ -1112,12 +903,665 @@ export default function GameTracker({
           game_note:
             notes.trim() || null,
 
+          two_pt_made:
+            counts.made2,
+
+          two_pt_missed:
+            counts.miss2,
+
+          three_pt_made:
+            counts.made3,
+
+          three_pt_missed:
+            counts.miss3,
+
+          ft_made:
+            counts.madeFT,
+
+          ft_missed:
+            counts.missFT,
+
           /*
-           * Team score can be added later.
+           * Current schema has
+           * OREB + DREB.
+           *
+           * Tracker now keeps the
+           * parent workflow simple:
+           * one REB button.
+           *
+           * Store all rebounds as
+           * defensive for now so
+           * total rebounds remain
+           * accurate.
            */
-          fly_score: null,
-          opponent_score: null,
-          result: null,
+
+          offensive_rebounds: 0,
+
+          defensive_rebounds:
+            counts.reb,
+
+          assists:
+            counts.ast,
+
+          steals:
+            counts.stl,
+
+          turnovers:
+            counts.to,
+
+          blocks:
+            counts.blk,
+
+          fouls:
+            counts.pf,
+
+          playing_seconds:
+            getCurrentPlayingSeconds(),
+        },
+        {
+          onConflict:
+            "player_id,user_id",
+        }
+      );
+
+    if (error) {
+      throw error;
+    }
+  }
+
+
+  /* =========================================================
+     AUTOSAVE AFTER EVERY CHANGE
+  ========================================================= */
+
+  useEffect(() => {
+
+    if (!draftReady) return;
+
+    /*
+     * Instant device save.
+     */
+
+    saveLocalDraft();
+
+    /*
+     * Debounced cloud save.
+     */
+
+    setSaveState("saving");
+
+    if (draftTimerRef.current) {
+
+      clearTimeout(
+        draftTimerRef.current
+      );
+    }
+
+    draftTimerRef.current =
+      setTimeout(async () => {
+
+        try {
+
+          await saveCloudDraft();
+
+          setSaveState("saved");
+
+          if (
+            saveStatusTimerRef.current
+          ) {
+
+            clearTimeout(
+              saveStatusTimerRef.current
+            );
+          }
+
+          saveStatusTimerRef.current =
+            setTimeout(() => {
+
+              setSaveState("idle");
+
+            }, 1600);
+
+        } catch (error) {
+
+          console.error(
+            "Autosave failed:",
+            error
+          );
+
+          setSaveState("error");
+        }
+
+      }, 350);
+
+
+    return () => {
+
+      if (draftTimerRef.current) {
+
+        clearTimeout(
+          draftTimerRef.current
+        );
+      }
+    };
+
+  }, [
+    draftReady,
+
+    date,
+    opponent,
+    notes,
+
+    counts,
+
+    playingSeconds,
+    isInGame,
+    liveSegmentStartedAt,
+
+    flyScore,
+    opponentScore,
+  ]);
+
+
+  /* =========================================================
+     SAVE BEFORE PAGE IS HIDDEN
+  ========================================================= */
+
+  useEffect(() => {
+
+    function emergencyLocalSave() {
+      saveLocalDraft();
+    }
+
+    function handleVisibility() {
+
+      if (
+        document.visibilityState ===
+        "hidden"
+      ) {
+
+        emergencyLocalSave();
+      }
+    }
+
+    window.addEventListener(
+      "pagehide",
+      emergencyLocalSave
+    );
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibility
+    );
+
+
+    return () => {
+
+      window.removeEventListener(
+        "pagehide",
+        emergencyLocalSave
+      );
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibility
+      );
+    };
+
+  });
+
+
+  /* =========================================================
+     TAP ACTIONS
+  ========================================================= */
+
+  function tapFeedback(
+    id: string
+  ) {
+
+    setLastTapId(id);
+
+    window.setTimeout(() => {
+      setLastTapId(null);
+    }, 120);
+
+    if (
+      vibOn &&
+      typeof navigator !==
+        "undefined" &&
+      "vibrate" in navigator
+    ) {
+
+      navigator.vibrate(12);
+    }
+  }
+
+
+  function increment(
+    key: keyof LiveCounts,
+    id: string
+  ) {
+
+    tapFeedback(id);
+
+    setCounts((current) => ({
+      ...current,
+
+      [key]:
+        current[key] + 1,
+    }));
+
+    setHistory((current) => [
+      ...current,
+      { key },
+    ]);
+  }
+
+
+  function undo() {
+
+    setHistory((current) => {
+
+      if (!current.length) {
+        return current;
+      }
+
+      const last =
+        current[
+          current.length - 1
+        ];
+
+      setCounts(
+        (existing) => ({
+          ...existing,
+
+          [last.key]:
+            clampNonNeg(
+              existing[last.key] -
+                1
+            ),
+        })
+      );
+
+      return current.slice(
+        0,
+        -1
+      );
+    });
+  }
+
+
+  /* =========================================================
+     IN / OUT
+  ========================================================= */
+
+  function subIn() {
+
+    if (isInGame) {
+      return;
+    }
+
+    setLiveSegmentStartedAt(
+      Date.now()
+    );
+
+    setIsInGame(true);
+
+    tapFeedback("in-game");
+  }
+
+
+  function subOut() {
+
+    if (
+      !isInGame ||
+      !liveSegmentStartedAt
+    ) {
+      return;
+    }
+
+    const segmentSeconds =
+      Math.floor(
+        (
+          Date.now() -
+          liveSegmentStartedAt
+        ) / 1000
+      );
+
+    setPlayingSeconds(
+      (current) =>
+        current +
+        segmentSeconds
+    );
+
+    setLiveSegmentStartedAt(
+      null
+    );
+
+    setIsInGame(false);
+
+    tapFeedback("subbed-out");
+  }
+
+
+  /* =========================================================
+     MANUAL SAFETY SAVE
+  ========================================================= */
+
+  async function saveProgress() {
+
+    try {
+
+      setSaveState("saving");
+
+      saveLocalDraft();
+
+      await saveCloudDraft();
+
+      setSaveState("saved");
+
+      if (
+        saveStatusTimerRef.current
+      ) {
+
+        clearTimeout(
+          saveStatusTimerRef.current
+        );
+      }
+
+      saveStatusTimerRef.current =
+        setTimeout(() => {
+
+          setSaveState("idle");
+
+        }, 1800);
+
+    } catch (error) {
+
+      console.error(
+        "Save Progress failed:",
+        error
+      );
+
+      setSaveState("error");
+
+      alert(
+        "Your game is saved on this device, but we could not confirm the cloud save. Keep the tracker open and try Save Progress again."
+      );
+    }
+  }
+
+
+  /* =========================================================
+     RESET
+  ========================================================= */
+
+  function resetGame() {
+
+    const confirmed =
+      window.confirm(
+        "Reset this live game?\n\nThis will clear the current stats, score, playing time, opponent and notes."
+      );
+
+    if (!confirmed) return;
+
+    setCounts({
+      ...emptyCounts,
+    });
+
+    setHistory([]);
+
+    setOpponent("");
+
+    setNotes("");
+
+    setFlyScore("");
+
+    setOpponentScore("");
+
+    setPlayingSeconds(0);
+
+    setDisplayedPlayingSeconds(0);
+
+    setIsInGame(false);
+
+    setLiveSegmentStartedAt(
+      null
+    );
+
+    setDate(todayISO());
+  }
+
+
+  /* =========================================================
+     COMPLETE GAME
+  ========================================================= */
+
+  async function completeGame() {
+
+    if (!player) {
+
+      alert(
+        "Player information is still loading."
+      );
+
+      return;
+    }
+
+
+    if (!player.membershipId) {
+
+      alert(
+        "We could not find this player's current team membership."
+      );
+
+      return;
+    }
+
+
+    const opponentName =
+      opponent.trim();
+
+
+    if (!opponentName) {
+
+      alert(
+        "Please enter the opponent before completing the game."
+      );
+
+      return;
+    }
+
+
+    if (
+      flyScore.trim() === "" ||
+      opponentScore.trim() === ""
+    ) {
+
+      alert(
+        "Please enter the final score before completing the game."
+      );
+
+      return;
+    }
+
+
+    const flyFinal =
+      Number(flyScore);
+
+    const opponentFinal =
+      Number(opponentScore);
+
+
+    if (
+      Number.isNaN(flyFinal) ||
+      Number.isNaN(
+        opponentFinal
+      )
+    ) {
+
+      alert(
+        "Please enter valid final scores."
+      );
+
+      return;
+    }
+
+
+    const result =
+      flyFinal >
+      opponentFinal
+        ? "W"
+        : flyFinal <
+          opponentFinal
+        ? "L"
+        : "T";
+
+
+    const fullName =
+      `${player.firstName} ${player.lastName}`.trim();
+
+
+    const confirmed =
+      window.confirm(
+        `Complete ${fullName}'s game vs. ${opponentName}?\n\n${result} ${flyFinal}-${opponentFinal}\n${liveStats.pts} PTS · ${liveStats.reb} REB · ${liveStats.ast} AST\n\nThis will save the final game to Flight Path.`
+      );
+
+
+    if (!confirmed) {
+      return;
+    }
+
+
+    setFinalizing(true);
+
+
+    try {
+
+      /*
+       * If player is currently
+       * IN GAME, stop the final
+       * active segment.
+       */
+
+      const finalPlayingSeconds =
+        getCurrentPlayingSeconds();
+
+
+      const {
+        data: { user },
+      } =
+        await supabase.auth.getUser();
+
+
+      if (!user) {
+
+        throw new Error(
+          "Please sign in again."
+        );
+      }
+
+
+      /* -----------------------------------------------------
+         CHECK GAME ACCESS
+      ----------------------------------------------------- */
+
+      const {
+        data: entitlement,
+        error: entitlementError,
+      } = await supabase
+        .from(
+          "flight_entitlements"
+        )
+        .select(
+          "id, games_total, games_used"
+        )
+        .eq(
+          "user_id",
+          user.id
+        )
+        .eq(
+          "status",
+          "active"
+        )
+        .order(
+          "created_at",
+          {
+            ascending: false,
+          }
+        )
+        .limit(1)
+        .maybeSingle();
+
+
+      if (entitlementError) {
+        throw entitlementError;
+      }
+
+
+      if (!entitlement) {
+
+        throw new Error(
+          "No active game access was found for this account."
+        );
+      }
+
+
+      const gamesTotal =
+        entitlement.games_total ?? 0;
+
+      const gamesUsed =
+        entitlement.games_used ?? 0;
+
+
+      if (
+        gamesUsed >=
+        gamesTotal
+      ) {
+
+        throw new Error(
+          "There are no game credits remaining on this account."
+        );
+      }
+
+
+      /* -----------------------------------------------------
+         CREATE GAME
+      ----------------------------------------------------- */
+
+      const {
+        data: game,
+        error: gameError,
+      } = await supabase
+        .from(
+          "flight_games"
+        )
+        .insert({
+          player_id:
+            playerId,
+
+          team_membership_id:
+            player.membershipId,
+
+          created_by:
+            user.id,
+
+          game_date:
+            date || todayISO(),
+
+          opponent_name:
+            opponentName,
+
+          fly_score:
+            flyFinal,
+
+          opponent_score:
+            opponentFinal,
+
+          result,
+
+          game_note:
+            notes.trim() || null,
 
           completed_at:
             new Date().toISOString(),
@@ -1125,29 +1569,25 @@ export default function GameTracker({
         .select("id")
         .single();
 
+
       if (gameError) {
         throw gameError;
       }
 
-      if (!gameRow?.id) {
-        throw new Error(
-          "Completed game was not created."
-        );
-      }
 
-      /*
-       * -------------------------------------------------------
-       * 2. CREATE GAME STATS
-       * -------------------------------------------------------
-       */
+      /* -----------------------------------------------------
+         CREATE STATS
+      ----------------------------------------------------- */
 
       const {
         error: statsError,
       } = await supabase
-        .from("flight_game_stats")
+        .from(
+          "flight_game_stats"
+        )
         .insert({
           game_id:
-            gameRow.id,
+            game.id,
 
           two_pt_made:
             counts.made2,
@@ -1168,8 +1608,7 @@ export default function GameTracker({
             counts.missFT,
 
           rebounds:
-            counts.orb +
-            counts.drb,
+            counts.reb,
 
           assists:
             counts.ast,
@@ -1180,661 +1619,1044 @@ export default function GameTracker({
           turnovers:
             counts.to,
 
-          blocks: 0,
+          blocks:
+            counts.blk,
 
           fouls:
             counts.pf,
 
-          playing_seconds: 0,
+          playing_seconds:
+            finalPlayingSeconds,
         });
 
+
       if (statsError) {
-        /*
-         * Best-effort cleanup so we don't leave
-         * an empty completed game.
-         */
-        try {
-          await supabase
-            .from("flight_games")
-            .delete()
-            .eq("id", gameRow.id);
-        } catch {
-          // Preserve original error below.
-        }
+
+        await supabase
+          .from(
+            "flight_games"
+          )
+          .delete()
+          .eq(
+            "id",
+            game.id
+          );
 
         throw statsError;
       }
 
-      /*
-       * -------------------------------------------------------
-       * 3. DELETE CLOUD DRAFT
-       * -------------------------------------------------------
-       */
+
+      /* -----------------------------------------------------
+         CONSUME ONE GAME CREDIT
+      ----------------------------------------------------- */
+
+      const {
+        error: creditError,
+      } = await supabase
+        .from(
+          "flight_entitlements"
+        )
+        .update({
+          games_used:
+            gamesUsed + 1,
+        })
+        .eq(
+          "id",
+          entitlement.id
+        );
+
+
+      if (creditError) {
+
+        /*
+         * Roll completed game
+         * back if credit update
+         * does not succeed.
+         */
+
+        await supabase
+          .from(
+            "flight_game_stats"
+          )
+          .delete()
+          .eq(
+            "game_id",
+            game.id
+          );
+
+        await supabase
+          .from(
+            "flight_games"
+          )
+          .delete()
+          .eq(
+            "id",
+            game.id
+          );
+
+        throw creditError;
+      }
+
+
+      /* -----------------------------------------------------
+         CLEAR CLOUD DRAFT
+      ----------------------------------------------------- */
 
       const {
         error: draftDeleteError,
       } = await supabase
-        .from("flight_game_drafts")
+        .from(
+          "flight_game_drafts"
+        )
         .delete()
-        .eq("player_id", playerId)
-        .eq("user_id", user.id);
+        .eq(
+          "player_id",
+          playerId
+        )
+        .eq(
+          "user_id",
+          user.id
+        );
+
 
       if (draftDeleteError) {
+
         console.error(
-          "Completed game saved, but draft cleanup failed:",
+          "Game completed, but draft cleanup failed:",
           draftDeleteError
         );
       }
 
-      /*
-       * -------------------------------------------------------
-       * 4. DELETE LOCAL DRAFT
-       * -------------------------------------------------------
-       */
 
-      if (typeof window !== "undefined") {
+      /* -----------------------------------------------------
+         CLEAR LOCAL DRAFT
+      ----------------------------------------------------- */
+
+      if (
+        typeof window !==
+        "undefined"
+      ) {
+
         localStorage.removeItem(
           DRAFT_KEY
         );
       }
 
-      /*
-       * -------------------------------------------------------
-       * 5. CLEAR LIVE TRACKER
-       * -------------------------------------------------------
-       */
+
+      /* -----------------------------------------------------
+         CLEAR LOCAL STATE
+      ----------------------------------------------------- */
 
       setCounts({
         ...emptyCounts,
       });
 
       setHistory([]);
-      setNotes("");
+
       setOpponent("");
 
-      /*
-       * -------------------------------------------------------
-       * 6. RETURN TO PLAYER HOME
-       * -------------------------------------------------------
-       */
+      setNotes("");
+
+      setFlyScore("");
+
+      setOpponentScore("");
+
+      setPlayingSeconds(0);
+
+      setDisplayedPlayingSeconds(
+        0
+      );
+
+      setLiveSegmentStartedAt(
+        null
+      );
+
+      setIsInGame(false);
+
+      setDate(todayISO());
+
+
+      /* -----------------------------------------------------
+         RETURN TO FLIGHT PATH
+      ----------------------------------------------------- */
 
       if (onGameSaved) {
+
         onGameSaved();
       }
+
+
     } catch (error) {
+
       console.error(
-        "Could not finalize Flight Path game:",
+        "Could not complete game:",
         error
       );
 
       alert(
-        "We couldn't finalize the game. Your live stats are still saved, so nothing has been lost. Please try again."
+        error instanceof Error
+          ? error.message
+          : "We couldn't complete the game. Your live game has not been intentionally cleared."
       );
+
     } finally {
+
       setFinalizing(false);
     }
   }
 
+
   /* =========================================================
-     DISPLAY VALUES
-     ========================================================= */
+     LOADING
+  ========================================================= */
 
-  const playerHeading = playerLoading
-    ? "LOADING PLAYER..."
-    : player.fullName || "PLAYER";
+  if (playerLoading) {
 
-  const jerseyDisplay =
-    player.jerseyNumber
-      ? ` · #${player.jerseyNumber}`
-      : "";
+    return (
+      <main className="loading">
+        LOADING FLIGHT PATH...
+      </main>
+    );
+  }
 
-  const teamSeasonLine = [
-    player.teamName,
-    player.seasonName,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+
+  if (
+    playerError ||
+    !player
+  ) {
+
+    return (
+      <main className="loading">
+
+        <div>
+          Unable to load player.
+        </div>
+
+      </main>
+    );
+  }
+
+
+  const fullName =
+    `${player.firstName} ${player.lastName}`.trim();
+
+
+  const result =
+    flyScore !== "" &&
+    opponentScore !== ""
+      ? Number(flyScore) >
+        Number(opponentScore)
+        ? "W"
+        : Number(flyScore) <
+          Number(opponentScore)
+        ? "L"
+        : "T"
+      : null;
+
 
   const saveLabel =
     saveState === "saving"
       ? "SAVING..."
+      : saveState === "saved"
+      ? "SAVED ✓"
       : saveState === "error"
-      ? "SAVED ON DEVICE"
+      ? "SAVE ISSUE"
       : "AUTO-SAVED ✓";
 
+
   /* =========================================================
-     RENDER
-     ========================================================= */
+     UI
+  ========================================================= */
 
   return (
-    <main className="fpPage">
-      <div className="fpShell">
-        {/* =====================================================
-            TOP NAV
-            ===================================================== */}
 
-        <div className="fpTopNav">
-          <button
-            type="button"
-            className="fpBackButton"
-            onClick={exitGame}
-          >
-            ← FLIGHT PATH
-          </button>
+    <main className="page">
+
+      <section className="tracker">
+
+
+        {/* ===================================================
+            HEADER
+        =================================================== */}
+
+        <div className="header">
 
           <button
             type="button"
-            className="fpVibrationButton"
-            onClick={() =>
-              setVibOn((current) => !current)
+            className="iconButton"
+            onClick={
+              onExitGame
             }
+            aria-label="Back to Player Home"
           >
-            VIB: {vibOn ? "ON" : "OFF"}
+            ‹
           </button>
+
+
+          <div className="playerTitle">
+
+            {fullName.toUpperCase()}
+
+            {player.jerseyNumber
+              ? `  #${player.jerseyNumber}`
+              : ""}
+
+          </div>
+
+
+          <div className="headerActions">
+
+            <button
+              className="smallAction"
+              type="button"
+              onClick={() =>
+                setVibOn(
+                  (current) =>
+                    !current
+                )
+              }
+            >
+              VIB {vibOn ? "ON" : "OFF"}
+            </button>
+
+          </div>
+
         </div>
 
-        {/* =====================================================
-            BRAND
-            ===================================================== */}
 
-        <header className="fpHeader">
-          <div className="fpEyebrow">
-            THE FLY ACADEMY
-          </div>
+        {/* ===================================================
+            STATUS
+        =================================================== */}
 
-          <div className="fpBrand">
-            FLIGHT PATH
-          </div>
+        <div className="statusRow">
 
-          <div className="fpTagline">
-            Track your game. See your journey.
-          </div>
-        </header>
+          <button
+            className={`statusIndicator ${
+              isInGame
+                ? "statusActive"
+                : ""
+            }`}
+            type="button"
+            onClick={
+              isInGame
+                ? subOut
+                : subIn
+            }
+          >
 
-        {/* =====================================================
-            PLAYER / GAME IDENTITY
-            ===================================================== */}
+            <span className="statusDot" />
 
-        <section className="fpIdentityCard">
-          <div className="fpIdentityTop">
-            <div>
-              <div className="fpSectionEyebrow">
-                GAME IN PROGRESS
-              </div>
+            {isInGame
+              ? "IN GAME"
+              : "SUBBED OUT"}
 
-              <h1 className="fpPlayerName">
-                {playerHeading}
-                {jerseyDisplay}
-              </h1>
+          </button>
 
-              <div className="fpMembership">
-                {teamSeasonLine ||
-                  "Loading team information..."}
-              </div>
+
+          <div className="timeBlock">
+
+            <div className="playingTime">
+
+              {formatClock(
+                displayedPlayingSeconds
+              )}
+
             </div>
 
-            <div className="fpSaveStatus">
-              {saveLabel}
+            <div className="timeLabel">
+
+              PLAYING TIME
+
             </div>
+
           </div>
 
-          {playerError ? (
-            <div className="fpError">
-              {playerError}
-            </div>
-          ) : null}
+        </div>
 
-          <div className="fpGameMetaGrid">
-            <div className="fpMetaField">
-              <label className="fpMetaLabel">
-                OPPONENT
-              </label>
 
-              <div className="fpOpponentWrap">
-                <span className="fpVs">
-                  VS.
-                </span>
+        {/* ===================================================
+            GAME IDENTITY
+        =================================================== */}
 
-                <input
-                  className="fpMetaInput"
-                  value={opponent}
-                  onChange={(event) =>
-                    setOpponent(
-                      event.target.value
-                    )
-                  }
-                  placeholder="Opponent"
-                  autoComplete="off"
-                />
-              </div>
-            </div>
+        <div className="gameInfo">
 
-            <div className="fpMetaField">
-              <label className="fpMetaLabel">
-                GAME DATE
-              </label>
+          <div className="infoCell">
 
-              <input
-                className="fpMetaInput fpDateInput"
-                value={date}
-                onChange={(event) =>
-                  setDate(
-                    event.target.value
-                  )
-                }
-                type="date"
-              />
-            </div>
-          </div>
-        </section>
+            <label>
+              OPPONENT
+            </label>
 
-        {/* =====================================================
-            LIVE SUMMARY
-            ===================================================== */}
-
-        <section className="fpSummaryCard">
-          <div className="fpPrimaryStats">
-            <StatTile
-              label="PTS"
-              value={scoring.points}
+            <input
+              value={opponent}
+              onChange={(e) =>
+                setOpponent(
+                  e.target.value
+                )
+              }
+              placeholder="Opponent"
             />
 
-            <StatTile
-              label="REB"
-              value={rebounds}
-            />
-
-            <StatTile
-              label="AST"
-              value={counts.ast}
-            />
-
-            <StatTile
-              label="STL"
-              value={counts.stl}
-            />
           </div>
 
-          <div className="fpShootingLine">
+
+          <div className="infoCell dateCell">
+
+            <label>
+              DATE
+            </label>
+
+            <input
+              type="date"
+              value={date}
+              onChange={(e) =>
+                setDate(
+                  e.target.value
+                )
+              }
+            />
+
+          </div>
+
+        </div>
+
+
+        {/* ===================================================
+            LIVE STAT SUMMARY
+        =================================================== */}
+
+        <div className="liveSummary">
+
+          <div className="summaryHeader">
+
             <span>
-              FG{" "}
-              <strong>
-                {scoring.fgm}-
-                {scoring.fga}
-              </strong>
+              LIVE STATS
             </span>
 
-            <span className="fpDot">
-              ·
+            <span className={
+              saveState === "error"
+                ? "saveIssue"
+                : ""
+            }>
+              {saveLabel}
+            </span>
+
+          </div>
+
+
+          <div className="summaryPrimary">
+
+            <div className="summaryStat">
+
+              <strong>
+                {liveStats.pts}
+              </strong>
+
+              <span>
+                PTS
+              </span>
+
+            </div>
+
+
+            <div className="summaryStat">
+
+              <strong>
+                {liveStats.reb}
+              </strong>
+
+              <span>
+                REB
+              </span>
+
+            </div>
+
+
+            <div className="summaryStat">
+
+              <strong>
+                {liveStats.ast}
+              </strong>
+
+              <span>
+                AST
+              </span>
+
+            </div>
+
+
+            <div className="summaryStat">
+
+              <strong>
+                {liveStats.stl}
+              </strong>
+
+              <span>
+                STL
+              </span>
+
+            </div>
+
+          </div>
+
+
+          <div className="summarySecondary">
+
+            <span>
+              FG{" "}
+              <b>
+                {liveStats.fgm}-
+                {liveStats.fga}
+              </b>
             </span>
 
             <span>
               3PT{" "}
-              <strong>
-                {scoring.tpm}-
-                {scoring.tpa}
-              </strong>
-            </span>
-
-            <span className="fpDot">
-              ·
+              <b>
+                {liveStats.threeMade}-
+                {liveStats.threeAttempts}
+              </b>
             </span>
 
             <span>
               FT{" "}
-              <strong>
-                {scoring.ftm}-
-                {scoring.fta}
-              </strong>
+              <b>
+                {liveStats.ftMade}-
+                {liveStats.ftAttempts}
+              </b>
             </span>
+
+            <span>
+              TO{" "}
+              <b>
+                {liveStats.to}
+              </b>
+            </span>
+
+            <span>
+              BLK{" "}
+              <b>
+                {liveStats.blk}
+              </b>
+            </span>
+
+            <span>
+              FL{" "}
+              <b>
+                {liveStats.pf}
+              </b>
+            </span>
+
           </div>
 
-          <div className="fpSecondaryStats">
-            <StatTile
-              label="FG%"
-              value={formatPct(
-                scoring.fgPct
-              )}
-            />
+        </div>
 
-            <StatTile
-              label="3PT%"
-              value={formatPct(
-                scoring.tpPct
-              )}
-            />
 
-            <StatTile
-              label="FT%"
-              value={formatPct(
-                scoring.ftPct
-              )}
-            />
+        {/* ===================================================
+            2PT
+        =================================================== */}
 
-            <StatTile
-              label="TO"
-              value={counts.to}
-            />
-          </div>
-        </section>
+        <div className="statSection">
 
-        {/* =====================================================
-            TRACKING CONTROLS
-            ===================================================== */}
-
-        <section className="fpTrackerCard">
-          <div className="fpTrackerHeader">
-            <div>
-              <div className="fpSectionEyebrow">
-                LIVE TRACKER
-              </div>
-
-              <h2 className="fpTrackerTitle">
-                Tap the game.
-              </h2>
-
-              <div className="fpTrackerSub">
-                Every tap is automatically
-                protected.
-              </div>
-            </div>
-
-            <div className="fpUndoReset">
-              <button
-                type="button"
-                className="fpUtilityButton"
-                onClick={confirmUndo}
-                disabled={
-                  history.length === 0
-                }
-              >
-                UNDO
-              </button>
-
-              <button
-                type="button"
-                className="fpUtilityButton"
-                onClick={confirmReset}
-              >
-                RESET
-              </button>
-            </div>
+          <div className="sectionTitle">
+            2-POINT FG
           </div>
 
-          {/* ---------------------------------------------------
-              SCORING
-              --------------------------------------------------- */}
 
-          <div className="fpGroupLabel">
-            SCORING
+          <div className="twoButtons">
+
+            <button
+              className={`makeButton ${
+                lastTapId ===
+                "made2"
+                  ? "tapFlash"
+                  : ""
+              }`}
+              type="button"
+              onClick={() =>
+                increment(
+                  "made2",
+                  "made2"
+                )
+              }
+            >
+
+              <strong>
+                +2
+              </strong>
+
+              <span>
+                MAKE
+              </span>
+
+            </button>
+
+
+            <button
+              className={`missButton ${
+                lastTapId ===
+                "miss2"
+                  ? "tapFlash"
+                  : ""
+              }`}
+              type="button"
+              onClick={() =>
+                increment(
+                  "miss2",
+                  "miss2"
+                )
+              }
+            >
+
+              <strong>
+                Ø2
+              </strong>
+
+              <span>
+                MISS
+              </span>
+
+            </button>
+
           </div>
 
-          <div className="fpScoringGrid">
-            <TapButton
-              id="made2"
-              activeId={lastTapId}
-              title="+2"
-              subtitle="MADE 2PT"
-              variant="make"
-              onTap={() =>
-                inc("made2", "made2")
-              }
-            />
+        </div>
 
-            <TapButton
-              id="miss2"
-              activeId={lastTapId}
-              title="2 MISS"
-              subtitle="MISSED 2PT"
-              variant="miss"
-              onTap={() =>
-                inc("miss2", "miss2")
-              }
-            />
 
-            <TapButton
-              id="made3"
-              activeId={lastTapId}
-              title="+3"
-              subtitle="MADE 3PT"
-              variant="make"
-              onTap={() =>
-                inc("made3", "made3")
-              }
-            />
+        {/* ===================================================
+            3PT
+        =================================================== */}
 
-            <TapButton
-              id="miss3"
-              activeId={lastTapId}
-              title="3 MISS"
-              subtitle="MISSED 3PT"
-              variant="miss"
-              onTap={() =>
-                inc("miss3", "miss3")
-              }
-            />
+        <div className="statSection">
 
-            <TapButton
-              id="madeFT"
-              activeId={lastTapId}
-              title="+FT"
-              subtitle="MADE FREE THROW"
-              variant="make"
-              onTap={() =>
-                inc(
+          <div className="sectionTitle">
+            3-POINT FG
+          </div>
+
+
+          <div className="twoButtons">
+
+            <button
+              className={`makeButton ${
+                lastTapId ===
+                "made3"
+                  ? "tapFlash"
+                  : ""
+              }`}
+              type="button"
+              onClick={() =>
+                increment(
+                  "made3",
+                  "made3"
+                )
+              }
+            >
+
+              <strong>
+                +3
+              </strong>
+
+              <span>
+                MAKE
+              </span>
+
+            </button>
+
+
+            <button
+              className={`missButton ${
+                lastTapId ===
+                "miss3"
+                  ? "tapFlash"
+                  : ""
+              }`}
+              type="button"
+              onClick={() =>
+                increment(
+                  "miss3",
+                  "miss3"
+                )
+              }
+            >
+
+              <strong>
+                Ø3
+              </strong>
+
+              <span>
+                MISS
+              </span>
+
+            </button>
+
+          </div>
+
+        </div>
+
+
+        {/* ===================================================
+            FREE THROW
+        =================================================== */}
+
+        <div className="statSection">
+
+          <div className="sectionTitle">
+            FREE THROWS
+          </div>
+
+
+          <div className="twoButtons">
+
+            <button
+              className={`makeButton ${
+                lastTapId ===
+                "madeFT"
+                  ? "tapFlash"
+                  : ""
+              }`}
+              type="button"
+              onClick={() =>
+                increment(
                   "madeFT",
                   "madeFT"
                 )
               }
-            />
+            >
 
-            <TapButton
-              id="missFT"
-              activeId={lastTapId}
-              title="FT MISS"
-              subtitle="MISSED FREE THROW"
-              variant="miss"
-              onTap={() =>
-                inc(
+              <strong>
+                +1
+              </strong>
+
+              <span>
+                MAKE
+              </span>
+
+            </button>
+
+
+            <button
+              className={`missButton ${
+                lastTapId ===
+                "missFT"
+                  ? "tapFlash"
+                  : ""
+              }`}
+              type="button"
+              onClick={() =>
+                increment(
                   "missFT",
                   "missFT"
                 )
               }
-            />
+            >
+
+              <strong>
+                Ø1
+              </strong>
+
+              <span>
+                MISS
+              </span>
+
+            </button>
+
           </div>
 
-          {/* ---------------------------------------------------
-              OTHER
-              --------------------------------------------------- */}
+        </div>
 
-          <div className="fpGroupLabel fpOtherLabel">
-            HUSTLE + OTHER
+
+        {/* ===================================================
+            OTHER STATS
+        =================================================== */}
+
+        <div className="otherStats">
+
+          {[
+            ["reb", "REB"],
+            ["ast", "AST"],
+            ["stl", "STL"],
+            ["to", "TO"],
+            ["blk", "BLK"],
+            ["pf", "FL"],
+          ].map(
+            ([key, label]) => (
+
+              <button
+                key={key}
+                type="button"
+                className={`otherButton ${
+                  lastTapId === key
+                    ? "tapFlash"
+                    : ""
+                }`}
+                onClick={() =>
+                  increment(
+                    key as keyof LiveCounts,
+                    key
+                  )
+                }
+              >
+
+                <span>
+                  {label}
+                </span>
+
+                <b>
+                  {
+                    counts[
+                      key as keyof LiveCounts
+                    ]
+                  }
+                </b>
+
+              </button>
+            )
+          )}
+
+        </div>
+
+
+        {/* ===================================================
+            PLAYING TIME
+        =================================================== */}
+
+        <div className="playingSection">
+
+          <div className="sectionTitle">
+            PLAYING TIME
           </div>
 
-          <div className="fpOtherGrid">
-            <TapButton
-              id="orb"
-              activeId={lastTapId}
-              title="OREB"
-              subtitle="OFFENSIVE REBOUND"
-              variant="neutral"
-              onTap={() =>
-                inc("orb", "orb")
-              }
-            />
 
-            <TapButton
-              id="drb"
-              activeId={lastTapId}
-              title="DREB"
-              subtitle="DEFENSIVE REBOUND"
-              variant="neutral"
-              onTap={() =>
-                inc("drb", "drb")
-              }
-            />
+          <div className="playingButtons">
 
-            <TapButton
-              id="ast"
-              activeId={lastTapId}
-              title="AST"
-              subtitle="ASSIST"
-              variant="neutral"
-              onTap={() =>
-                inc("ast", "ast")
-              }
-            />
+            <button
+              className={`inButton ${
+                isInGame
+                  ? "playingSelected"
+                  : ""
+              }`}
+              type="button"
+              onClick={subIn}
+            >
 
-            <TapButton
-              id="stl"
-              activeId={lastTapId}
-              title="STL"
-              subtitle="STEAL"
-              variant="neutral"
-              onTap={() =>
-                inc("stl", "stl")
-              }
-            />
+              <strong>
+                🏃 IN GAME
+              </strong>
 
-            <TapButton
-              id="to"
-              activeId={lastTapId}
-              title="TO"
-              subtitle="TURNOVER"
-              variant="neutral"
-              onTap={() =>
-                inc("to", "to")
-              }
-            />
+              <span>
+                TAP WHEN IN
+              </span>
 
-            <TapButton
-              id="pf"
-              activeId={lastTapId}
-              title="FOUL"
-              subtitle="PERSONAL FOUL"
-              variant="neutral"
-              onTap={() =>
-                inc("pf", "pf")
-              }
-            />
+            </button>
+
+
+            <button
+              className={`outButton ${
+                !isInGame
+                  ? "outSelected"
+                  : ""
+              }`}
+              type="button"
+              onClick={subOut}
+            >
+
+              <strong>
+                ♿ SUBBED OUT
+              </strong>
+
+              <span>
+                TAP WHEN OUT
+              </span>
+
+            </button>
+
           </div>
 
-          {/* ---------------------------------------------------
-              NOTES
-              --------------------------------------------------- */}
+        </div>
 
-          <div className="fpNotesWrap">
-            <label className="fpGroupLabel">
-              GAME NOTES
-            </label>
 
-            <textarea
-              className="fpNotes"
-              value={notes}
-              onChange={(event) =>
-                setNotes(
-                  event.target.value
-                )
-              }
-              rows={3}
-              placeholder="Optional..."
-            />
+        {/* ===================================================
+            SAFETY CONTROLS
+        =================================================== */}
+
+        <div className="safetyRow">
+
+          <button
+            type="button"
+            className="utilityButton"
+            disabled={
+              !history.length
+            }
+            onClick={undo}
+          >
+            ↶ UNDO
+          </button>
+
+
+          <button
+            type="button"
+            className="utilityButton"
+            onClick={
+              saveProgress
+            }
+          >
+            SAVE PROGRESS
+          </button>
+
+
+          <button
+            type="button"
+            className="utilityButton dangerUtility"
+            onClick={resetGame}
+          >
+            RESET
+          </button>
+
+        </div>
+
+
+        {/* ===================================================
+            GAME RESULT
+        =================================================== */}
+
+        <div className="resultSection">
+
+          <div className="sectionTitle">
+            GAME RESULT
           </div>
-        </section>
 
-        {/* =====================================================
-            SAVE / FINALIZE
-            ===================================================== */}
 
-        <section className="fpFinishCard">
-          <div className="fpFinishCopy">
-            <div className="fpSectionEyebrow">
-              YOUR GAME IS PROTECTED
-            </div>
+          <div className="scoreArea">
 
-            <div className="fpFinishTitle">
-              {saveState === "saving"
-                ? "Saving your latest stats..."
-                : saveState === "error"
-                ? "Saved safely on this device."
-                : "Auto-saved as you track."}
-            </div>
+            <div className="scoreBlock">
 
-            <div className="fpFinishText">
-              Use Save Progress anytime you
-              want an extra checkpoint. Finalize
-              only when the game is over.
-            </div>
-
-            {manualSaveMessage ? (
-              <div className="fpSaveMessage">
-                {manualSaveMessage}
+              <div className="scoreLabel">
+                FLY
               </div>
-            ) : null}
+
+              <input
+                inputMode="numeric"
+                value={flyScore}
+                onChange={(e) =>
+                  setFlyScore(
+                    e.target.value
+                      .replace(
+                        /\D/g,
+                        ""
+                      )
+                  )
+                }
+                placeholder="0"
+              />
+
+            </div>
+
+
+            <div className="dash">
+              –
+            </div>
+
+
+            <div className="scoreBlock">
+
+              <div className="scoreLabel muted">
+                OPPONENT
+              </div>
+
+              <input
+                inputMode="numeric"
+                value={
+                  opponentScore
+                }
+                onChange={(e) =>
+                  setOpponentScore(
+                    e.target.value
+                      .replace(
+                        /\D/g,
+                        ""
+                      )
+                  )
+                }
+                placeholder="0"
+              />
+
+            </div>
+
+
+            <div className="resultBadge">
+
+              <div className="scoreLabel">
+                RESULT
+              </div>
+
+              <strong
+                className={
+                  result === "W"
+                    ? "win"
+                    : result === "L"
+                    ? "loss"
+                    : ""
+                }
+              >
+                {result ?? "—"}
+              </strong>
+
+            </div>
+
           </div>
 
-          <div className="fpFinishActions">
-            <button
-              type="button"
-              className="fpSaveProgressButton"
-              onClick={saveProgress}
-            >
-              SAVE PROGRESS
-            </button>
 
-            <button
-              type="button"
-              className="fpFinalizeButton"
-              onClick={finalizeGame}
-              disabled={
-                finalizing ||
-                playerLoading
-              }
-            >
+          <textarea
+            className="notes"
+            value={notes}
+            onChange={(e) =>
+              setNotes(
+                e.target.value
+              )
+            }
+            placeholder="Game note · optional"
+            rows={2}
+          />
+
+
+          <button
+            className="completeButton"
+            type="button"
+            onClick={
+              completeGame
+            }
+            disabled={
+              finalizing
+            }
+          >
+
+            <strong>
               {finalizing
-                ? "FINALIZING..."
-                : "FINALIZE GAME →"}
-            </button>
-          </div>
-        </section>
-      </div>
+                ? "SAVING GAME..."
+                : "COMPLETE GAME"}
+            </strong>
 
-      {/* =======================================================
+            <span>
+              SAVE STATS & FINAL SCORE
+            </span>
+
+          </button>
+
+        </div>
+
+
+      </section>
+
+
+      {/* =====================================================
           STYLES
-          ======================================================= */}
+      ===================================================== */}
 
       <style>{`
-        :root {
-          --fp-bg: #050505;
-          --fp-card: #0d0d0d;
-          --fp-card-2: #101010;
-          --fp-line: #292929;
-          --fp-line-soft: #202020;
-
-          --fp-white: #f7f7f7;
-          --fp-text: #eeeeee;
-          --fp-muted: #929292;
-          --fp-muted-2: #686868;
-
-          --fp-make: #6f9db9;
-          --fp-make-active: #82b1cc;
-
-          --fp-miss: #d8492f;
-          --fp-miss-active: #ea563b;
-
-          --fp-neutral: #181818;
-          --fp-neutral-active: #252525;
-        }
 
         * {
           box-sizing: border-box;
         }
 
-        html,
-        body {
-          margin: 0;
-          background: var(--fp-bg);
-        }
 
         button,
         input,
@@ -1842,810 +2664,1472 @@ export default function GameTracker({
           font: inherit;
         }
 
+
         button {
-          -webkit-tap-highlight-color: transparent;
           touch-action: manipulation;
+          -webkit-tap-highlight-color:
+            transparent;
         }
 
-        .fpPage {
+
+        .loading {
+
           min-height: 100vh;
-          background: var(--fp-bg);
-          color: var(--fp-text);
+
+          background: #000;
+
+          color: #fff;
+
+          display: flex;
+
+          align-items: center;
+
+          justify-content: center;
+
           font-family:
             Arial,
             Helvetica,
             sans-serif;
 
+          font-size: 12px;
+
+          font-weight: 800;
+
+          letter-spacing: .16em;
+        }
+
+
+        .page {
+
+          min-height: 100vh;
+
+          background:
+            radial-gradient(
+              circle at 50% 0%,
+              #111 0,
+              #050505 42%,
+              #000 100%
+            );
+
+          color: #fff;
+
           padding:
-            max(18px, env(safe-area-inset-top))
             18px
-            max(36px, env(safe-area-inset-bottom));
+            12px
+            40px;
+
+          font-family:
+            Arial,
+            Helvetica,
+            sans-serif;
         }
 
-        .fpShell {
+
+        .tracker {
+
           width: 100%;
-          max-width: 760px;
-          margin: 0 auto;
-        }
 
-        /* =====================================================
-           NAV
-           ===================================================== */
-
-        .fpTopNav {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 12px;
-
-          margin-bottom: 28px;
-        }
-
-        .fpBackButton,
-        .fpVibrationButton {
-          appearance: none;
-
-          background: transparent;
-          color: #8c8c8c;
-
-          border: 1px solid #242424;
-          border-radius: 999px;
-
-          padding: 10px 13px;
-
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
-
-          cursor: pointer;
-        }
-
-        .fpBackButton:hover,
-        .fpVibrationButton:hover {
-          color: white;
-          border-color: #444;
-        }
-
-        /* =====================================================
-           HEADER
-           ===================================================== */
-
-        .fpHeader {
-          text-align: center;
-          margin-bottom: 34px;
-        }
-
-        .fpEyebrow {
-          color: #777;
-
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.3em;
-
-          margin-bottom: 10px;
-        }
-
-        .fpBrand {
-          color: white;
-
-          font-size: clamp(28px, 5vw, 40px);
-          font-weight: 900;
-          letter-spacing: -0.03em;
-        }
-
-        .fpTagline {
-          color: #888;
-
-          margin-top: 9px;
-
-          font-size: 13px;
-        }
-
-        /* =====================================================
-           COMMON CARDS
-           ===================================================== */
-
-        .fpIdentityCard,
-        .fpSummaryCard,
-        .fpTrackerCard,
-        .fpFinishCard {
-          background: var(--fp-card);
-
-          border: 1px solid var(--fp-line);
-
-          border-radius: 24px;
-        }
-
-        .fpIdentityCard {
-          padding: 24px;
-          margin-bottom: 14px;
-        }
-
-        .fpSummaryCard {
-          padding: 16px;
-          margin-bottom: 14px;
-        }
-
-        .fpTrackerCard {
-          padding: 24px;
-          margin-bottom: 14px;
-        }
-
-        .fpFinishCard {
-          padding: 24px;
-        }
-
-        /* =====================================================
-           IDENTITY
-           ===================================================== */
-
-        .fpIdentityTop {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 16px;
-        }
-
-        .fpSectionEyebrow {
-          color: #777;
-
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 0.22em;
-
-          text-transform: uppercase;
-        }
-
-        .fpPlayerName {
-          color: white;
+          max-width: 540px;
 
           margin:
-            9px 0
-            7px;
+            0 auto;
+        }
 
-          font-size:
-            clamp(
-              25px,
-              6vw,
-              36px
-            );
+
+        /* HEADER */
+
+        .header {
+
+          min-height: 58px;
+
+          display: grid;
+
+          grid-template-columns:
+            48px
+            1fr
+            auto;
+
+          gap: 8px;
+
+          align-items: center;
+
+          margin-bottom: 8px;
+        }
+
+
+        .iconButton {
+
+          width: 44px;
+
+          height: 44px;
+
+          border: 0;
+
+          background:
+            transparent;
+
+          color: #fff;
+
+          font-size: 42px;
 
           line-height: 1;
 
-          font-weight: 900;
-          letter-spacing: -0.035em;
-
-          text-transform: uppercase;
+          cursor: pointer;
         }
 
-        .fpMembership {
-          color: #969696;
 
-          font-size: 13px;
-          line-height: 1.5;
-        }
-
-        .fpSaveStatus {
-          color: #777;
-
-          font-size: 9px;
-          letter-spacing: 0.12em;
-          font-weight: 800;
-
-          white-space: nowrap;
-        }
-
-        .fpError {
-          margin-top: 14px;
-
-          color: #ff7a65;
-
-          font-size: 12px;
-        }
-
-        .fpGameMetaGrid {
-          margin-top: 24px;
-
-          padding-top: 20px;
-
-          border-top:
-            1px solid
-            var(--fp-line-soft);
-
-          display: grid;
-          grid-template-columns:
-            1.4fr 0.8fr;
-
-          gap: 12px;
-        }
-
-        .fpMetaField {
-          min-width: 0;
-        }
-
-        .fpMetaLabel {
-          display: block;
-
-          margin-bottom: 7px;
-
-          color: #696969;
-
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 0.18em;
-        }
-
-        .fpOpponentWrap {
-          display: flex;
-          align-items: center;
-
-          background: #141414;
-          border: 1px solid #292929;
-          border-radius: 14px;
-
-          overflow: hidden;
-        }
-
-        .fpVs {
-          color: #727272;
-
-          padding-left: 12px;
-
-          font-size: 11px;
-          font-weight: 900;
-        }
-
-        .fpMetaInput {
-          width: 100%;
-          min-width: 0;
-
-          background: #141414;
-          color: white;
-
-          border: 1px solid #292929;
-          border-radius: 14px;
-
-          padding: 13px;
-
-          outline: none;
-
-          font-size: 14px;
-        }
-
-        .fpOpponentWrap .fpMetaInput {
-          border: none;
-          border-radius: 0;
-
-          padding-left: 8px;
-        }
-
-        .fpMetaInput:focus,
-        .fpOpponentWrap:focus-within {
-          border-color: #555;
-        }
-
-        .fpMetaInput::placeholder {
-          color: #5d5d5d;
-        }
-
-        .fpDateInput {
-          color-scheme: dark;
-        }
-
-        /* =====================================================
-           SUMMARY
-           ===================================================== */
-
-        .fpPrimaryStats {
-          display: grid;
-          grid-template-columns:
-            repeat(4, 1fr);
-
-          gap: 8px;
-        }
-
-        .fpSecondaryStats {
-          display: grid;
-          grid-template-columns:
-            repeat(4, 1fr);
-
-          gap: 8px;
-
-          margin-top: 8px;
-        }
-
-        .fpStatTile {
-          min-width: 0;
-
-          background: var(--fp-card-2);
-
-          border: 1px solid
-            var(--fp-line-soft);
-
-          border-radius: 16px;
-
-          padding: 13px;
-        }
-
-        .fpStatLabel {
-          color: #6d6d6d;
-
-          font-size: 8px;
-          font-weight: 800;
-          letter-spacing: 0.16em;
-
-          white-space: nowrap;
-        }
-
-        .fpStatValue {
-          color: white;
-
-          margin-top: 5px;
+        .playerTitle {
 
           font-size:
             clamp(
-              20px,
-              4vw,
-              27px
+              18px,
+              5vw,
+              25px
             );
 
           font-weight: 900;
 
+          text-align: center;
+
+          letter-spacing:
+            .015em;
+
           white-space: nowrap;
         }
 
-        .fpStatDetail {
-          color: #6c6c6c;
 
-          margin-top: 3px;
+        .headerActions {
 
-          font-size: 9px;
+          display: flex;
+
+          justify-content:
+            flex-end;
         }
 
-        .fpShootingLine {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 7px;
 
-          color: #8c8c8c;
+        .smallAction {
+
+          border:
+            1px solid
+            #2f2f2f;
+
+          background:
+            #0c0c0c;
+
+          color:
+            #aaa;
+
+          border-radius:
+            999px;
 
           padding:
-            13px 3px
-            5px;
+            8px 9px;
 
-          font-size: 11px;
+          font-size:
+            9px;
+
+          font-weight:
+            800;
+
+          cursor:
+            pointer;
         }
 
-        .fpShootingLine strong {
-          color: #c8c8c8;
-        }
 
-        .fpDot {
-          color: #484848;
-        }
+        /* STATUS */
 
-        /* =====================================================
-           TRACKER
-           ===================================================== */
+        .statusRow {
 
-        .fpTrackerHeader {
           display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
 
-          gap: 14px;
+          align-items: center;
 
-          margin-bottom: 24px;
-        }
+          justify-content:
+            space-between;
 
-        .fpTrackerTitle {
-          color: white;
+          gap: 16px;
 
           margin:
-            8px 0
+            8px 10px
+            12px;
+        }
+
+
+        .statusIndicator {
+
+          display: flex;
+
+          align-items:
+            center;
+
+          gap: 10px;
+
+          padding: 0;
+
+          border: 0;
+
+          background:
+            transparent;
+
+          color:
+            #888;
+
+          font-weight:
+            900;
+
+          font-size:
+            22px;
+
+          letter-spacing:
+            .04em;
+
+          cursor:
+            pointer;
+        }
+
+
+        .statusIndicator.statusActive {
+
+          color:
+            #12d83f;
+        }
+
+
+        .statusDot {
+
+          width: 15px;
+
+          height: 15px;
+
+          border-radius:
+            50%;
+
+          background:
+            #555;
+        }
+
+
+        .statusActive
+        .statusDot {
+
+          background:
+            #12d83f;
+
+          box-shadow:
+            0 0 14px
+            rgba(
+              18,
+              216,
+              63,
+              .45
+            );
+        }
+
+
+        .timeBlock {
+
+          text-align:
+            right;
+        }
+
+
+        .playingTime {
+
+          font-size:
+            32px;
+
+          font-weight:
+            500;
+
+          line-height:
+            1;
+        }
+
+
+        .timeLabel {
+
+          margin-top:
             5px;
 
-          font-size: 24px;
+          color:
+            #aaa;
 
-          font-weight: 900;
-          letter-spacing: -0.03em;
+          font-size:
+            10px;
+
+          letter-spacing:
+            .14em;
+
+          font-weight:
+            800;
         }
 
-        .fpTrackerSub {
-          color: #777;
-          font-size: 12px;
-        }
 
-        .fpUndoReset {
-          display: flex;
-          gap: 6px;
-        }
+        /* GAME INFO */
 
-        .fpUtilityButton {
-          appearance: none;
-
-          background: #151515;
-          color: #8d8d8d;
-
-          border: 1px solid
-            #282828;
-
-          border-radius: 999px;
-
-          padding: 9px 11px;
-
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 0.08em;
-
-          cursor: pointer;
-        }
-
-        .fpUtilityButton:disabled {
-          opacity: 0.32;
-          cursor: default;
-        }
-
-        .fpGroupLabel {
-          display: block;
-
-          color: #727272;
-
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 0.18em;
-
-          text-transform: uppercase;
-        }
-
-        .fpOtherLabel {
-          margin-top: 26px;
-        }
-
-        .fpScoringGrid {
-          margin-top: 10px;
+        .gameInfo {
 
           display: grid;
-          grid-template-columns:
-            1fr 1fr;
 
-          gap: 10px;
+          grid-template-columns:
+            1fr
+            138px;
+
+          gap: 8px;
+
+          margin-bottom:
+            8px;
         }
 
-        .fpOtherGrid {
-          margin-top: 10px;
 
-          display: grid;
-          grid-template-columns:
-            repeat(3, 1fr);
+        .infoCell {
 
-          gap: 10px;
+          border:
+            1px solid
+            #2a2a2a;
+
+          background:
+            #090909;
+
+          border-radius:
+            12px;
+
+          padding:
+            8px 12px;
         }
 
-        /* =====================================================
-           TAP BUTTONS
-           ===================================================== */
 
-        .fpTapButton {
-          appearance: none;
+        .infoCell label {
+
+          display:
+            block;
+
+          color:
+            #777;
+
+          font-size:
+            8px;
+
+          font-weight:
+            800;
+
+          letter-spacing:
+            .16em;
+
+          margin-bottom:
+            4px;
+        }
+
+
+        .infoCell input {
 
           width: 100%;
 
-          border: none;
-          border-radius: 18px;
+          border: 0;
 
-          min-height: 92px;
+          outline: 0;
 
-          padding: 17px;
+          background:
+            transparent;
 
-          text-align: left;
+          color: #fff;
 
-          cursor: pointer;
+          font-size:
+            14px;
 
-          user-select: none;
-          -webkit-user-select: none;
+          font-weight:
+            700;
+        }
+
+
+        /* LIVE SUMMARY */
+
+        .liveSummary {
+
+          border:
+            1px solid
+            #343434;
+
+          border-radius:
+            14px;
+
+          background:
+            linear-gradient(
+              180deg,
+              #101010,
+              #080808
+            );
+
+          padding:
+            9px 10px
+            10px;
+
+          margin-bottom:
+            8px;
+        }
+
+
+        .summaryHeader {
+
+          display: flex;
+
+          justify-content:
+            space-between;
+
+          color:
+            #888;
+
+          font-size:
+            8px;
+
+          font-weight:
+            900;
+
+          letter-spacing:
+            .15em;
+
+          margin:
+            0 4px
+            7px;
+        }
+
+
+        .saveIssue {
+
+          color:
+            #ff4d4d;
+        }
+
+
+        .summaryPrimary {
+
+          display: grid;
+
+          grid-template-columns:
+            repeat(
+              4,
+              1fr
+            );
+
+          border:
+            1px solid
+            #242424;
+
+          border-radius:
+            10px;
+
+          overflow:
+            hidden;
+        }
+
+
+        .summaryStat {
+
+          min-height:
+            49px;
+
+          display: flex;
+
+          flex-direction:
+            column;
+
+          align-items:
+            center;
+
+          justify-content:
+            center;
+
+          border-right:
+            1px solid
+            #242424;
+        }
+
+
+        .summaryStat:last-child {
+
+          border-right:
+            0;
+        }
+
+
+        .summaryStat strong {
+
+          font-size:
+            21px;
+
+          line-height:
+            1;
+
+          font-weight:
+            900;
+        }
+
+
+        .summaryStat span {
+
+          margin-top:
+            5px;
+
+          color:
+            #777;
+
+          font-size:
+            8px;
+
+          letter-spacing:
+            .12em;
+
+          font-weight:
+            800;
+        }
+
+
+        .summarySecondary {
+
+          display: flex;
+
+          flex-wrap: wrap;
+
+          justify-content:
+            center;
+
+          gap:
+            6px 14px;
+
+          padding-top:
+            8px;
+
+          color:
+            #888;
+
+          font-size:
+            10px;
+        }
+
+
+        .summarySecondary b {
+
+          color:
+            #fff;
+
+          font-weight:
+            800;
+        }
+
+
+        /* STAT SECTIONS */
+
+        .statSection {
+
+          border:
+            1px solid
+            #323232;
+
+          border-radius:
+            13px;
+
+          padding:
+            7px 9px
+            9px;
+
+          margin-bottom:
+            7px;
+
+          background:
+            rgba(
+              0,
+              0,
+              0,
+              .5
+            );
+        }
+
+
+        .sectionTitle {
+
+          text-align:
+            center;
+
+          color:
+            #f0f0f0;
+
+          font-size:
+            13px;
+
+          font-weight:
+            900;
+
+          letter-spacing:
+            .08em;
+
+          margin-bottom:
+            6px;
+        }
+
+
+        .twoButtons {
+
+          display: grid;
+
+          grid-template-columns:
+            1fr 1fr;
+
+          gap: 8px;
+        }
+
+
+        .makeButton,
+        .missButton {
+
+          min-height:
+            74px;
+
+          border-radius:
+            13px;
+
+          color: #fff;
+
+          cursor:
+            pointer;
+
+          display: flex;
+
+          flex-direction:
+            column;
+
+          align-items:
+            center;
+
+          justify-content:
+            center;
 
           transition:
-            transform 80ms ease,
-            filter 100ms ease,
-            background 100ms ease;
+            transform
+            80ms ease,
+            filter
+            80ms ease;
         }
 
-        .fpTapMake {
-          background: var(--fp-make);
-          color: white;
-        }
 
-        .fpTapMiss {
-          background: var(--fp-miss);
-          color: white;
-        }
+        .makeButton {
 
-        .fpTapNeutral {
+          border:
+            2px solid
+            #12df49;
+
           background:
-            var(--fp-neutral);
+            linear-gradient(
+              135deg,
+              #006c20,
+              #0aa635
+            );
 
-          color: white;
+          box-shadow:
+            inset
+            0 0 20px
+            rgba(
+              0,
+              255,
+              70,
+              .13
+            );
+        }
+
+
+        .missButton {
+
+          border:
+            2px solid
+            #ff2626;
+
+          background:
+            linear-gradient(
+              135deg,
+              #970000,
+              #e00808
+            );
+
+          box-shadow:
+            inset
+            0 0 20px
+            rgba(
+              255,
+              30,
+              30,
+              .14
+            );
+        }
+
+
+        .makeButton strong,
+        .missButton strong {
+
+          font-size:
+            35px;
+
+          line-height:
+            .95;
+
+          font-weight:
+            900;
+        }
+
+
+        .makeButton span,
+        .missButton span {
+
+          margin-top:
+            5px;
+
+          font-size:
+            12px;
+
+          font-weight:
+            900;
+
+          letter-spacing:
+            .05em;
+        }
+
+
+        .tapFlash {
+
+          filter:
+            brightness(
+              1.35
+            );
+
+          transform:
+            scale(.97);
+        }
+
+
+        /* OTHER STATS */
+
+        .otherStats {
+
+          display: grid;
+
+          grid-template-columns:
+            repeat(
+              3,
+              1fr
+            );
+
+          gap: 7px;
+
+          margin:
+            7px 1px
+            10px;
+        }
+
+
+        .otherButton {
+
+          min-height:
+            61px;
+
+          border:
+            1px solid
+            #777;
+
+          border-radius:
+            11px;
+
+          background:
+            linear-gradient(
+              180deg,
+              #111,
+              #050505
+            );
+
+          color: #fff;
+
+          cursor:
+            pointer;
+
+          display: flex;
+
+          align-items:
+            center;
+
+          justify-content:
+            center;
+
+          gap: 8px;
+        }
+
+
+        .otherButton span {
+
+          font-size:
+            23px;
+
+          font-weight:
+            900;
+        }
+
+
+        .otherButton b {
+
+          min-width:
+            19px;
+
+          height:
+            19px;
+
+          display: flex;
+
+          align-items:
+            center;
+
+          justify-content:
+            center;
+
+          border-radius:
+            999px;
+
+          background:
+            #292929;
+
+          color:
+            #bbb;
+
+          font-size:
+            9px;
+        }
+
+
+        /* PLAYING TIME */
+
+        .playingSection {
+
+          margin-top:
+            4px;
+        }
+
+
+        .playingButtons {
+
+          display: grid;
+
+          grid-template-columns:
+            1fr 1fr;
+
+          gap: 8px;
+        }
+
+
+        .inButton,
+        .outButton {
+
+          min-height:
+            70px;
+
+          border-radius:
+            12px;
+
+          color: #fff;
+
+          cursor:
+            pointer;
+
+          display: flex;
+
+          flex-direction:
+            column;
+
+          align-items:
+            center;
+
+          justify-content:
+            center;
+        }
+
+
+        .inButton {
+
+          border:
+            1px solid
+            #0eb93b;
+
+          background:
+            #073715;
+        }
+
+
+        .inButton.playingSelected {
+
+          background:
+            linear-gradient(
+              135deg,
+              #008727,
+              #0ab83b
+            );
+
+          box-shadow:
+            0 0 20px
+            rgba(
+              18,
+              216,
+              63,
+              .18
+            );
+        }
+
+
+        .outButton {
+
+          border:
+            1px solid
+            #555;
+
+          background:
+            #141414;
+        }
+
+
+        .outButton.outSelected {
+
+          background:
+            #242424;
+        }
+
+
+        .inButton strong,
+        .outButton strong {
+
+          font-size:
+            15px;
+
+          font-weight:
+            900;
+        }
+
+
+        .inButton span,
+        .outButton span {
+
+          margin-top:
+            5px;
+
+          font-size:
+            9px;
+
+          letter-spacing:
+            .08em;
+        }
+
+
+        /* SAFETY */
+
+        .safetyRow {
+
+          display: grid;
+
+          grid-template-columns:
+            1fr 1.4fr 1fr;
+
+          gap: 7px;
+
+          margin:
+            10px 0;
+        }
+
+
+        .utilityButton {
+
+          min-height:
+            39px;
+
+          border:
+            1px solid
+            #3a3a3a;
+
+          border-radius:
+            9px;
+
+          background:
+            #101010;
+
+          color:
+            #ccc;
+
+          font-size:
+            9px;
+
+          font-weight:
+            900;
+
+          letter-spacing:
+            .07em;
+
+          cursor:
+            pointer;
+        }
+
+
+        .utilityButton:disabled {
+
+          opacity:
+            .3;
+        }
+
+
+        .dangerUtility {
+
+          color:
+            #b0b0b0;
+        }
+
+
+        /* RESULT */
+
+        .resultSection {
 
           border:
             1px solid
             #303030;
+
+          border-radius:
+            14px;
+
+          padding:
+            10px;
+
+          margin-top:
+            7px;
         }
 
-        .fpTapActive {
-          transform: scale(0.975);
-          filter: brightness(1.15);
+
+        .scoreArea {
+
+          display: grid;
+
+          grid-template-columns:
+            1fr
+            24px
+            1fr
+            72px;
+
+          align-items:
+            end;
+
+          gap:
+            5px;
         }
 
-        .fpTapTitle {
+
+        .scoreBlock {
+
+          text-align:
+            center;
+        }
+
+
+        .scoreLabel {
+
+          min-height:
+            20px;
+
+          color:
+            #a641f4;
+
           font-size:
-            clamp(
-              20px,
-              4vw,
-              26px
-            );
+            9px;
 
-          font-weight: 900;
-          letter-spacing: -0.02em;
+          font-weight:
+            900;
+
+          letter-spacing:
+            .08em;
+
+          margin-bottom:
+            5px;
         }
 
-        .fpTapSubtitle {
-          margin-top: 8px;
 
-          font-size: 9px;
-          font-weight: 800;
+        .scoreLabel.muted {
 
-          letter-spacing: 0.08em;
-
-          opacity: 0.72;
+          color:
+            #aaa;
         }
 
-        /* =====================================================
-           NOTES
-           ===================================================== */
 
-        .fpNotesWrap {
-          margin-top: 26px;
-        }
+        .scoreBlock input {
 
-        .fpNotes {
           width: 100%;
 
-          margin-top: 9px;
+          height: 50px;
 
-          resize: vertical;
+          border:
+            1px solid
+            #555;
 
-          background: #141414;
-          color: white;
+          border-radius:
+            9px;
 
-          border: 1px solid #292929;
-          border-radius: 16px;
+          background:
+            #111;
 
-          padding: 14px;
+          color:
+            #fff;
 
-          outline: none;
+          text-align:
+            center;
 
-          font-size: 13px;
-          line-height: 1.5;
+          font-size:
+            25px;
+
+          font-weight:
+            900;
+
+          outline:
+            none;
         }
 
-        .fpNotes:focus {
-          border-color: #4c4c4c;
-        }
 
-        .fpNotes::placeholder {
-          color: #555;
-        }
+        .dash {
 
-        /* =====================================================
-           FINISH
-           ===================================================== */
+          height:
+            50px;
 
-        .fpFinishCard {
           display: flex;
-          justify-content: space-between;
-          align-items: center;
 
-          gap: 22px;
+          align-items:
+            center;
+
+          justify-content:
+            center;
+
+          font-size:
+            22px;
         }
 
-        .fpFinishCopy {
-          flex: 1;
-          min-width: 0;
+
+        .resultBadge {
+
+          text-align:
+            center;
         }
 
-        .fpFinishTitle {
-          color: white;
 
-          margin-top: 8px;
+        .resultBadge strong {
 
-          font-size: 17px;
-          font-weight: 800;
-        }
+          height:
+            50px;
 
-        .fpFinishText {
-          max-width: 400px;
+          border:
+            1px solid
+            #555;
 
-          margin-top: 5px;
+          border-radius:
+            9px;
 
-          color: #777;
-
-          font-size: 11px;
-          line-height: 1.5;
-        }
-
-        .fpSaveMessage {
-          display: inline-block;
-
-          margin-top: 11px;
-
-          padding: 7px 10px;
-
-          background: #161616;
-
-          border: 1px solid #303030;
-          border-radius: 999px;
-
-          color: #a4a4a4;
-
-          font-size: 10px;
-          font-weight: 700;
-        }
-
-        .fpFinishActions {
           display: flex;
-          gap: 8px;
 
-          flex-shrink: 0;
+          align-items:
+            center;
+
+          justify-content:
+            center;
+
+          background:
+            #151515;
+
+          font-size:
+            27px;
+
+          font-weight:
+            900;
         }
 
-        .fpSaveProgressButton,
-        .fpFinalizeButton {
-          appearance: none;
 
-          border-radius: 14px;
+        .resultBadge
+        strong.win {
 
-          padding: 14px 16px;
+          background:
+            #05952c;
 
-          font-size: 11px;
-          font-weight: 900;
-          letter-spacing: 0.02em;
-
-          cursor: pointer;
+          border-color:
+            #11d447;
         }
 
-        .fpSaveProgressButton {
-          background: #161616;
-          color: white;
 
-          border: 1px solid #343434;
+        .resultBadge
+        strong.loss {
+
+          background:
+            #8f0707;
+
+          border-color:
+            #e61f1f;
         }
 
-        .fpFinalizeButton {
-          background: white;
-          color: black;
 
-          border: 1px solid white;
+        .notes {
+
+          width: 100%;
+
+          margin-top:
+            8px;
+
+          border:
+            1px solid
+            #333;
+
+          border-radius:
+            9px;
+
+          background:
+            #090909;
+
+          color:
+            #fff;
+
+          padding:
+            9px 11px;
+
+          outline:
+            none;
+
+          resize:
+            vertical;
+
+          font-size:
+            11px;
         }
 
-        .fpFinalizeButton:disabled {
-          opacity: 0.45;
-          cursor: default;
+
+        .completeButton {
+
+          width: 100%;
+
+          min-height:
+            68px;
+
+          margin-top:
+            8px;
+
+          border:
+            1px solid
+            #9a4aee;
+
+          border-radius:
+            11px;
+
+          background:
+            linear-gradient(
+              135deg,
+              #45117f,
+              #7426b7
+            );
+
+          color: #fff;
+
+          cursor:
+            pointer;
+
+          display:
+            flex;
+
+          flex-direction:
+            column;
+
+          align-items:
+            center;
+
+          justify-content:
+            center;
+
+          box-shadow:
+            0 0 24px
+            rgba(
+              126,
+              42,
+              206,
+              .18
+            );
         }
 
-        /* =====================================================
-           TABLET / PHONE
-           ===================================================== */
 
-        @media (max-width: 640px) {
-          .fpPage {
-            padding-left: 12px;
-            padding-right: 12px;
+        .completeButton strong {
+
+          font-size:
+            18px;
+
+          letter-spacing:
+            .06em;
+
+          font-weight:
+            900;
+        }
+
+
+        .completeButton span {
+
+          margin-top:
+            4px;
+
+          font-size:
+            10px;
+
+          letter-spacing:
+            .09em;
+
+          font-weight:
+            700;
+        }
+
+
+        .completeButton:disabled {
+
+          opacity:
+            .6;
+
+          cursor:
+            wait;
+        }
+
+
+        /* MOBILE */
+
+        @media (
+          max-width: 430px
+        ) {
+
+          .page {
+            padding:
+              10px
+              8px
+              30px;
           }
 
-          .fpTopNav {
-            margin-bottom: 22px;
+
+          .tracker {
+            max-width:
+              none;
           }
 
-          .fpHeader {
-            margin-bottom: 26px;
-          }
 
-          .fpIdentityCard,
-          .fpTrackerCard,
-          .fpFinishCard {
-            border-radius: 20px;
-            padding: 18px;
-          }
+          .header {
 
-          .fpSummaryCard {
-            border-radius: 20px;
-            padding: 10px;
-          }
-
-          .fpIdentityTop {
-            display: block;
-          }
-
-          .fpSaveStatus {
-            margin-top: 13px;
-          }
-
-          .fpGameMetaGrid {
-            grid-template-columns: 1fr;
-          }
-
-          .fpPrimaryStats,
-          .fpSecondaryStats {
             grid-template-columns:
-              repeat(4, 1fr);
-
-            gap: 5px;
+              36px
+              1fr
+              48px;
           }
 
-          .fpStatTile {
-            padding: 10px 8px;
-            border-radius: 13px;
+
+          .iconButton {
+
+            width:
+              34px;
           }
 
-          .fpStatValue {
-            font-size: 21px;
+
+          .playerTitle {
+
+            font-size:
+              18px;
           }
 
-          .fpOtherGrid {
+
+          .smallAction {
+
+            padding:
+              7px 5px;
+
+            font-size:
+              7px;
+          }
+
+
+          .statusRow {
+
+            margin-left:
+              6px;
+
+            margin-right:
+              6px;
+          }
+
+
+          .statusIndicator {
+
+            font-size:
+              18px;
+          }
+
+
+          .playingTime {
+
+            font-size:
+              28px;
+          }
+
+
+          .gameInfo {
+
             grid-template-columns:
-              repeat(2, 1fr);
+              1fr
+              122px;
           }
 
-          .fpTrackerHeader {
-            display: block;
+
+          .summarySecondary {
+
+            font-size:
+              9px;
+
+            gap:
+              5px 10px;
           }
 
-          .fpUndoReset {
-            margin-top: 14px;
+
+          .makeButton,
+          .missButton {
+
+            min-height:
+              69px;
           }
 
-          .fpFinishCard {
-            display: block;
+
+          .makeButton strong,
+          .missButton strong {
+
+            font-size:
+              31px;
           }
 
-          .fpFinishActions {
-            display: grid;
-            grid-template-columns: 1fr;
 
-            margin-top: 18px;
+          .otherButton {
+
+            min-height:
+              57px;
           }
 
-          .fpSaveProgressButton,
-          .fpFinalizeButton {
-            width: 100%;
 
-            padding: 16px;
+          .otherButton span {
+
+            font-size:
+              20px;
           }
+
+
+          .scoreArea {
+
+            grid-template-columns:
+              1fr
+              18px
+              1fr
+              62px;
+          }
+
         }
 
-        @media (max-width: 390px) {
-          .fpPrimaryStats,
-          .fpSecondaryStats {
-            grid-template-columns:
-              repeat(2, 1fr);
-          }
-
-          .fpScoringGrid {
-            gap: 8px;
-          }
-
-          .fpTapButton {
-            min-height: 86px;
-            padding: 14px;
-          }
-
-          .fpBackButton,
-          .fpVibrationButton {
-            font-size: 8px;
-          }
-        }
       `}</style>
+
     </main>
   );
 }
