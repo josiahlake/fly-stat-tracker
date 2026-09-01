@@ -64,6 +64,35 @@ export default function FlightPathApp() {
     }
   }
 
+  async function openLatestCompletedGame() {
+    if (!playerId) {
+      setAppState("has-player");
+      return;
+    }
+
+    const { data: latestGame, error: latestGameError } = await supabase
+      .from("flight_games")
+      .select("id")
+      .eq("player_id", playerId)
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestGameError) {
+      console.error("Could not load completed game:", latestGameError);
+      setAppState("has-player");
+      return;
+    }
+
+    if (latestGame?.id) {
+      setCompletedGameId(latestGame.id);
+      setAppState("postgame");
+      return;
+    }
+
+    setAppState("has-player");
+  }
+
   useEffect(() => {
     checkAccount();
 
@@ -172,10 +201,7 @@ export default function FlightPathApp() {
         onExitGame={() =>
           setAppState("has-player")
         }
-        onGameSaved={(gameId) => {
-          setCompletedGameId(gameId);
-          setAppState("postgame");
-        }}
+        onGameSaved={openLatestCompletedGame}
       />
     );
   }
