@@ -118,34 +118,23 @@ function SeasonStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PathLevel({
-  icon,
-  name,
-  className,
-}: {
-  icon: string;
-  name: string;
-  className: string;
-}) {
-  return (
-    <div className={`pathLevel ${className}`}>
-      <div className="pathIcon">{icon}</div>
-      <div className="pathName">{name}</div>
-    </div>
-  );
-}
-
 function NavItem({
   icon,
   label,
   active = false,
+  onClick,
 }: {
   icon: string;
   label: string;
   active?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <button type="button" className={`navItem ${active ? "active" : ""}`}>
+    <button
+      type="button"
+      className={`navItem ${active ? "active" : ""}`}
+      onClick={onClick}
+    >
       <span className="navIcon">{icon}</span>
       <span>{label}</span>
     </button>
@@ -156,7 +145,7 @@ export default function FlightPathPlayerHome({
   playerId,
   onStartGame,
   onOpenLog,
-}: Props) {{
+}: Props) {
   const [data, setData] = useState<PlayerHomeData | null>(null);
   const [liveGame, setLiveGame] = useState<LiveGameDraft | null>(null);
   const [completedGames, setCompletedGames] = useState<CompletedGame[]>([]);
@@ -382,6 +371,7 @@ export default function FlightPathPlayerHome({
     }
 
     loadPlayerHome();
+
     return () => {
       cancelled = true;
     };
@@ -394,6 +384,7 @@ export default function FlightPathPlayerHome({
 
   const season = useMemo(() => {
     const games = completedGames.length;
+
     const totals = completedGames.reduce(
       (acc, game) => {
         acc.points += game.points;
@@ -460,26 +451,44 @@ export default function FlightPathPlayerHome({
             <span>FLIGHT PATH</span>
             <span className="plane">➤</span>
           </div>
-          <button className="iconButton" type="button" aria-label="Notifications">
+
+          <button
+            className="iconButton"
+            type="button"
+            aria-label="Notifications"
+          >
             ♢
           </button>
         </header>
 
         <section className="playerHero">
           <div className="avatar">
-            <div className="avatarInner">{initials(data.firstName, data.lastName)}</div>
+            <div className="avatarInner">
+              {initials(data.firstName, data.lastName)}
+            </div>
           </div>
+
           <div className="playerIdentity">
             <div className="playerName">{playerName}</div>
+
             <div className="playerMeta">
               {data.jerseyNumber ? <span>#{data.jerseyNumber}</span> : null}
               {data.jerseyNumber && data.teamName ? <span className="dot">•</span> : null}
-              {data.teamName ? <span>{data.teamName.replace(/\s*\[[^\]]+\]\s*/, "")}</span> : null}
+              {data.teamName ? (
+                <span>
+                  {data.teamName.replace(/\s*\[[^\]]+\]\s*/, "")}
+                </span>
+              ) : null}
             </div>
+
             <div className={`level ${currentLevelClass}`}>
               {level}
               <span className="levelMark">
-                {currentLevelClass === "air" ? "➤" : currentLevelClass === "select" ? "☆" : "⌃"}
+                {currentLevelClass === "air"
+                  ? "➤"
+                  : currentLevelClass === "select"
+                  ? "☆"
+                  : "⌃"}
               </span>
             </div>
           </div>
@@ -494,9 +503,15 @@ export default function FlightPathPlayerHome({
           <section className="liveGameCard">
             <div className="liveTop">
               <div>
-                <div className="liveLabel"><span className="liveDot" /> GAME IN PROGRESS</div>
-                <div className="liveOpponent">vs. {liveGame.opponentName}</div>
+                <div className="liveLabel">
+                  <span className="liveDot" /> GAME IN PROGRESS
+                </div>
+
+                <div className="liveOpponent">
+                  vs. {liveGame.opponentName}
+                </div>
               </div>
+
               <div className="autoSave">AUTO-SAVED ✓</div>
             </div>
 
@@ -515,17 +530,28 @@ export default function FlightPathPlayerHome({
               FT {liveGame.freeThrowsMade}-{liveGame.freeThrowsAttempted}
             </div>
 
-            <button type="button" className="trackButton resume" onClick={onStartGame}>
+            <button
+              type="button"
+              className="trackButton resume"
+              onClick={onStartGame}
+            >
               RESUME GAME <span>→</span>
             </button>
           </section>
         ) : (
           <>
-            <button type="button" className="trackButton" onClick={onStartGame}>
+            <button
+              type="button"
+              className="trackButton"
+              onClick={onStartGame}
+            >
               <span className="plus">＋</span> TRACK A GAME
             </button>
+
             <div className="accessLine">
-              {gamesRemaining === 1 ? "1 GAME REMAINING" : `${gamesRemaining} GAMES REMAINING`}
+              {gamesRemaining === 1
+                ? "1 GAME REMAINING"
+                : `${gamesRemaining} GAMES REMAINING`}
             </div>
           </>
         )}
@@ -533,8 +559,11 @@ export default function FlightPathPlayerHome({
         <section className="sectionCard">
           <div className="sectionHeader">
             <span>SEASON STATS</span>
-            <span className="sectionMeta">{season.games} {season.games === 1 ? "GAME" : "GAMES"}</span>
+            <span className="sectionMeta">
+              {season.games} {season.games === 1 ? "GAME" : "GAMES"}
+            </span>
           </div>
+
           <div className="seasonGrid">
             <SeasonStat value={season.ppg.toFixed(1)} label="PPG" />
             <SeasonStat value={season.rpg.toFixed(1)} label="RPG" />
@@ -547,126 +576,168 @@ export default function FlightPathPlayerHome({
         <section className="sectionCard">
           <div className="sectionHeader">
             <span>LAST 5 GAMES</span>
-            <span className="sectionMeta">{lastFive.length ? `${lastFive.length} PLAYED` : "NO GAMES"}</span>
+            <span className="sectionMeta">
+              {lastFive.length ? `${lastFive.length} PLAYED` : "NO GAMES"}
+            </span>
           </div>
+
           {lastFive.length ? (
             <div className="trendLive">
               <div>
                 <div className="trendValue">{lastFivePpg.toFixed(1)}</div>
                 <div className="trendLabel">PPG</div>
               </div>
+
               <div className="sparkline" aria-label="Points in last five games">
-                {lastFive.slice().reverse().map((game, index) => {
-                  const max = Math.max(...lastFive.map((item) => item.points), 1);
-                  const height = 14 + (game.points / max) * 32;
-                  return (
-                    <span key={game.id} style={{ height: `${height}px` }}>
-                      <i>{game.points}</i>
-                    </span>
-                  );
-                })}
+                {lastFive
+                  .slice()
+                  .reverse()
+                  .map((game) => {
+                    const max = Math.max(
+                      ...lastFive.map((item) => item.points),
+                      1
+                    );
+
+                    const height = 14 + (game.points / max) * 32;
+
+                    return (
+                      <span
+                        key={game.id}
+                        style={{
+                          height: `${height}px`,
+                        }}
+                      >
+                        <i>{game.points}</i>
+                      </span>
+                    );
+                  })}
               </div>
-              <div className={`trendCompare ${lastFiveDelta >= 0 ? "up" : "down"}`}>
-                <strong>{lastFiveDelta >= 0 ? "+" : ""}{lastFiveDelta.toFixed(1)}</strong>
+
+              <div
+                className={`trendCompare ${
+                  lastFiveDelta >= 0 ? "up" : "down"
+                }`}
+              >
+                <strong>
+                  {lastFiveDelta >= 0 ? "+" : ""}
+                  {lastFiveDelta.toFixed(1)}
+                </strong>
+
                 <span>VS SEASON</span>
               </div>
             </div>
           ) : (
-            <div className="emptyGame">Your last-five trend will appear after completed games.</div>
+            <div className="emptyGame">
+              Your last-five trend will appear after completed games.
+            </div>
           )}
         </section>
 
         <section className="sectionCard">
-          <div className="sectionHeader"><span>LAST GAME</span></div>
+          <div className="sectionHeader">
+            <span>LAST GAME</span>
+          </div>
+
           {lastGame ? (
             <div className="lastGameCard">
               <div className="lastGameTop">
                 <div>
-                  <div className="lastOpponent">vs. {lastGame.opponentName}</div>
-                  <div className="lastDate">{formatGameDate(lastGame.gameDate)}</div>
+                  <div className="lastOpponent">
+                    vs. {lastGame.opponentName}
+                  </div>
+
+                  <div className="lastDate">
+                    {formatGameDate(lastGame.gameDate)}
+                  </div>
                 </div>
-                <div className={`resultBadge ${(lastGame.result || "").toLowerCase()}`}>
+
+                <div
+                  className={`resultBadge ${(
+                    lastGame.result || ""
+                  ).toLowerCase()}`}
+                >
                   {lastGame.result ?? "—"}
-                  {lastGame.flyScore !== null && lastGame.opponentScore !== null ? (
-                    <span>{lastGame.flyScore}-{lastGame.opponentScore}</span>
+
+                  {lastGame.flyScore !== null &&
+                  lastGame.opponentScore !== null ? (
+                    <span>
+                      {lastGame.flyScore}-{lastGame.opponentScore}
+                    </span>
                   ) : null}
                 </div>
               </div>
+
               <div className="lastStats">
                 <Stat label="PTS" value={lastGame.points} />
                 <Stat label="REB" value={lastGame.rebounds} />
                 <Stat label="AST" value={lastGame.assists} />
                 <Stat label="STL" value={lastGame.steals} />
               </div>
+
               <div className="lastGameMeta">
                 FG {lastGame.fieldGoalsMade}-{lastGame.fieldGoalsAttempted}
-                <span>•</span> 3PT {lastGame.threePointersMade}-{lastGame.threePointersAttempted}
-                <span>•</span> FT {lastGame.freeThrowsMade}-{lastGame.freeThrowsAttempted}
-                {lastGame.playingSeconds > 0 ? <><span>•</span> {formatPlayingTime(lastGame.playingSeconds)} MIN</> : null}
+                <span>•</span>
+                3PT {lastGame.threePointersMade}-{lastGame.threePointersAttempted}
+                <span>•</span>
+                FT {lastGame.freeThrowsMade}-{lastGame.freeThrowsAttempted}
+
+                {lastGame.playingSeconds > 0 ? (
+                  <>
+                    <span>•</span>
+                    {formatPlayingTime(lastGame.playingSeconds)} MIN
+                  </>
+                ) : null}
               </div>
             </div>
           ) : (
-            <div className="emptyGame">Complete your first game to begin building your Flight Path.</div>
+            <div className="emptyGame">
+              Complete your first game to begin building your Flight Path.
+            </div>
           )}
         </section>
 
-<section className="pathCard">
-  <div className="sectionHeader">
-    <span>YOUR FLIGHT PATH</span>
-  </div>
+        <section className="pathCard">
+          <div className="sectionHeader">
+            <span>YOUR FLIGHT PATH</span>
+          </div>
 
-  <div className="pathLevels">
-    <FlightLevelMark
-      level="elevate"
-      showName
-      size="sm"
-    />
+          <div className="pathLevels">
+            <FlightLevelMark level="elevate" showName size="sm" />
 
-    <div className="pathLine" />
+            <div className="pathLine" />
 
-    <FlightLevelMark
-      level="ascend"
-      showName
-      size="sm"
-    />
+            <FlightLevelMark level="ascend" showName size="sm" />
 
-    <div className="pathLine" />
+            <div className="pathLine" />
 
-    <FlightLevelMark
-      level="air"
-      showName
-      size="sm"
-    />
+            <FlightLevelMark level="air" showName size="sm" />
 
-    <div className="pathLine" />
+            <div className="pathLine" />
 
-    <FlightLevelMark
-      level="select"
-      showName
-      size="sm"
-    />
-  </div>
-</section>
+            <FlightLevelMark level="select" showName size="sm" />
+          </div>
+        </section>
 
         <nav className="bottomNav">
           <NavItem icon="⌂" label="HOME" active />
-<button
-  type="button"
-  className="navItem"
-  onClick={onOpenLog}
->
-  <span className="navIcon">
-    ▣
-  </span>
 
-  <span>
-    LOG
-  </span>
-</button>
-          <button type="button" className="trackNav" onClick={onStartGame}>
-            <span>＋</span><small>TRACK</small>
+          <NavItem
+            icon="▣"
+            label="LOG"
+            onClick={onOpenLog}
+          />
+
+          <button
+            type="button"
+            className="trackNav"
+            onClick={onStartGame}
+          >
+            <span>＋</span>
+            <small>TRACK</small>
           </button>
+
           <NavItem icon="➤" label="PATH" />
+
           <NavItem icon="♙" label="PLAYER" />
         </nav>
       </section>
@@ -722,7 +793,7 @@ const styles = `${stateStyles}
   .emptyGame{border:1px dashed #2d2d32;border-radius:10px;padding:17px;color:#7f7f85;font-size:12px;line-height:1.5}
   .lastGameCard{border:1px solid #29292e;border-radius:11px;background:#080809;padding:12px}.lastGameTop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.lastOpponent{font-size:18px;font-weight:950}.lastDate{margin-top:4px;color:#77777d;font-size:9px;font-weight:800;letter-spacing:.08em}.resultBadge{min-width:58px;border:1px solid #3b3b40;border-radius:9px;padding:7px 8px;text-align:center;color:#fff;font-size:18px;font-weight:950}.resultBadge span{display:block;margin-top:3px;color:#b9b9be;font-size:8px;font-weight:800}.resultBadge.w{border-color:#19863c;background:rgba(0,180,58,.12);color:#30e566}.resultBadge.l{border-color:#8b2424;background:rgba(210,20,20,.10);color:#ff5f5f}.resultBadge.t{border-color:#66666b;color:#d6d6d8}.lastStats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:12px}.lastGameMeta{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px;color:#85858b;font-size:9px;font-weight:700}
 
-  .pathLevels{display:grid;grid-template-columns:auto 1fr auto 1fr auto 1fr auto;align-items:center;gap:8px;padding:2px 0 4px}.pathLevel{text-align:center;opacity:.55}.pathLevel.active{opacity:1}.pathIcon{font-size:25px;line-height:1}.pathName{font-size:8px;font-weight:950;letter-spacing:.06em;margin-top:6px}.pathLine{height:1px;background:#38383d}.pathLevel.elevate{color:#d59b21}.pathLevel.ascend{color:#a84df5}.pathLevel.air{color:#00bed0}.pathLevel.select{color:#fff}
+  .pathLevels{display:grid;grid-template-columns:auto 1fr auto 1fr auto 1fr auto;align-items:center;gap:8px;padding:2px 0 4px}.pathLine{height:1px;background:#38383d}
 
   .bottomNav{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:min(100%,430px);height:76px;padding:7px 9px calc(7px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 1fr 1.15fr 1fr 1fr;align-items:end;background:rgba(5,5,6,.96);backdrop-filter:blur(14px);border-top:1px solid #29292e;z-index:20}
   .navItem,.trackNav{border:0;background:transparent;color:#8b8b91;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:8px;font-weight:900;letter-spacing:.06em;cursor:pointer}.navItem.active{color:#a84df5}.navIcon{font-size:22px;line-height:1}.trackNav{align-self:center}.trackNav>span{width:45px;height:45px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#7b2bb7,#4f176e);color:#fff;border:1px solid #9848d4;font-size:27px;box-shadow:0 0 18px rgba(121,43,182,.28)}.trackNav small{font-size:8px;color:#c9c9cd;font-weight:900;letter-spacing:.07em}
