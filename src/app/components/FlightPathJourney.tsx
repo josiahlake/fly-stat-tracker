@@ -11,6 +11,7 @@ type Props = {
   onHome: () => void;
   onOpenLog: () => void;
   onTrackGame: () => void;
+  onOpenPlayer: () => void;
 };
 
 type Membership = {
@@ -148,6 +149,7 @@ export default function FlightPathJourney({
   onHome,
   onOpenLog,
   onTrackGame,
+  onOpenPlayer,
 }: Props) {
   const [tab, setTab] = useState<Tab>("season");
   const [player, setPlayer] = useState<Player | null>(null);
@@ -781,7 +783,7 @@ export default function FlightPathJourney({
             <small>PATH</small>
           </button>
 
-          <button type="button" className="navItem">
+          <button type="button" className="navItem" onClick={onOpenPlayer}>
             <span className="navIcon"><NavIcon type="player" /></span>
             <small>PLAYER</small>
           </button>

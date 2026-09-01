@@ -8,6 +8,7 @@ import FlightPathPlayerHome from "./FlightPathPlayerHome";
 import FlightPathPostgameRecap from "./FlightPathPostgameRecap";
 import FlightPathLog from "./FlightPathLog";
 import FlightPathJourney from "./FlightPathJourney";
+import FlightPathPlayerProfile from "./FlightPathPlayerProfile";
 import GameTracker from "./GameTracker";
 
 import { supabase } from "../lib/supabase";
@@ -20,22 +21,16 @@ type AppState =
   | "tracking-game"
   | "postgame"
   | "flight-log"
-  | "flight-path";
+  | "flight-path"
+  | "player-profile";
 
 export default function FlightPathApp() {
-  const [appState, setAppState] =
-    useState<AppState>("loading");
-
-  const [playerId, setPlayerId] =
-    useState<string | null>(null);
-
-  const [completedGameId, setCompletedGameId] =
-    useState<string | null>(null);
+  const [appState, setAppState] = useState<AppState>("loading");
+  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [completedGameId, setCompletedGameId] = useState<string | null>(null);
 
   async function checkAccount() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       setPlayerId(null);
@@ -57,7 +52,7 @@ export default function FlightPathApp() {
       return;
     }
 
-    if (access && access.length > 0) {
+    if (access?.length) {
       setPlayerId(access[0].player_id);
       setAppState("has-player");
     } else {
@@ -72,7 +67,7 @@ export default function FlightPathApp() {
       return;
     }
 
-    const { data: latestGame, error: latestGameError } = await supabase
+    const { data: latestGame, error } = await supabase
       .from("flight_games")
       .select("id")
       .eq("player_id", playerId)
@@ -80,8 +75,8 @@ export default function FlightPathApp() {
       .limit(1)
       .maybeSingle();
 
-    if (latestGameError) {
-      console.error("Could not load completed game:", latestGameError);
+    if (error) {
+      console.error("Could not load completed game:", error);
       setAppState("has-player");
       return;
     }
@@ -89,47 +84,29 @@ export default function FlightPathApp() {
     if (latestGame?.id) {
       setCompletedGameId(latestGame.id);
       setAppState("postgame");
-      return;
+    } else {
+      setAppState("has-player");
     }
-
-    setAppState("has-player");
   }
 
   useEffect(() => {
     checkAccount();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
       checkAccount();
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
   if (appState === "loading") {
     return (
-      <main
-        style={{
-          minHeight: "100vh",
-          background: "#050505",
-          color: "#ffffff",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "Arial, Helvetica, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            fontSize: "11px",
-            letterSpacing: "0.24em",
-            color: "#777777",
-            fontWeight: 800,
-          }}
-        >
+      <main style={{
+        minHeight:"100vh",background:"#050505",color:"#fff",
+        display:"flex",alignItems:"center",justifyContent:"center",
+        fontFamily:"Arial, Helvetica, sans-serif"
+      }}>
+        <div style={{fontSize:"11px",letterSpacing:"0.24em",color:"#777",fontWeight:800}}>
           LOADING FLIGHT PATH...
         </div>
       </main>
@@ -157,6 +134,8 @@ export default function FlightPathApp() {
         playerId={playerId}
         onStartGame={() => setAppState("tracking-game")}
         onOpenLog={() => setAppState("flight-log")}
+        onOpenPath={() => setAppState("flight-path")}
+        onOpenPlayer={() => setAppState("player-profile")}
       />
     );
   }
@@ -167,6 +146,8 @@ export default function FlightPathApp() {
         playerId={playerId}
         onHome={() => setAppState("has-player")}
         onTrackGame={() => setAppState("tracking-game")}
+        onOpenPath={() => setAppState("flight-path")}
+        onOpenPlayer={() => setAppState("player-profile")}
         onOpenGame={(gameId) => {
           setCompletedGameId(gameId);
           setAppState("postgame");
@@ -182,6 +163,19 @@ export default function FlightPathApp() {
         onHome={() => setAppState("has-player")}
         onOpenLog={() => setAppState("flight-log")}
         onTrackGame={() => setAppState("tracking-game")}
+        onOpenPlayer={() => setAppState("player-profile")}
+      />
+    );
+  }
+
+  if (appState === "player-profile" && playerId) {
+    return (
+      <FlightPathPlayerProfile
+        playerId={playerId}
+        onHome={() => setAppState("has-player")}
+        onOpenLog={() => setAppState("flight-log")}
+        onTrackGame={() => setAppState("tracking-game")}
+        onOpenPath={() => setAppState("flight-path")}
       />
     );
   }
@@ -196,11 +190,7 @@ export default function FlightPathApp() {
     );
   }
 
-  if (
-    appState === "postgame" &&
-    playerId &&
-    completedGameId
-  ) {
+  if (appState === "postgame" && playerId && completedGameId) {
     return (
       <FlightPathPostgameRecap
         playerId={playerId}
