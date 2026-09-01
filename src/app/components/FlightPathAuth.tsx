@@ -65,64 +65,66 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
 
   const isSignIn = mode === "signin";
 
+  function switchMode(nextMode: AuthMode) {
+    setMode(nextMode);
+    setMessage("");
+    setError("");
+  }
+
   return (
-    <main className="authPage">
-      <section className="authShell">
+    <main className="fpAuthPage">
+      <section className="fpAuthShell">
+        <header className="fpBrand">
+          <div className="fpAcademy">THE FLY ACADEMY</div>
 
-        {/* BRAND */}
-        <header className="brandBlock">
-          <div className="academyLabel">THE FLY ACADEMY</div>
-
-          <div className="brandRow">
-            <h1>FLIGHT PATH</h1>
-            <span className="planeMark">➤</span>
+          <div className="fpBrandRow">
+            <div className="fpWordmark">FLIGHT PATH</div>
+            <div className="fpPlane">➤</div>
           </div>
 
-          <div className="tagline">
+          <div className="fpTagline">
             TRACK <span>YOUR</span> GAME. SEE <span>YOUR</span> JOURNEY.
           </div>
         </header>
 
-        {/* LEVEL JOURNEY */}
-        <section className="journey">
-          <div className="journeyStep elevate">
-            <div className="journeyIcon">⌃</div>
+        <section className="fpJourney">
+          <div className="fpLevel fpElevate">
+            <div className="fpLevelIcon">⌃</div>
             <strong>ELEVATE</strong>
           </div>
 
-          <div className="arrow">→</div>
+          <div className="fpArrow">→</div>
 
-          <div className="journeyStep ascend">
-            <div className="journeyIcon">⌃</div>
+          <div className="fpLevel fpAscend">
+            <div className="fpLevelIcon">⌃</div>
             <strong>ASCEND</strong>
           </div>
 
-          <div className="arrow">→</div>
+          <div className="fpArrow">→</div>
 
-          <div className="journeyStep air">
-            <div className="journeyIcon airIcon">➤</div>
+          <div className="fpLevel fpAir">
+            <div className="fpLevelIcon fpAirIcon">➤</div>
             <strong>AIR</strong>
           </div>
 
-          <div className="arrow">→</div>
+          <div className="fpArrow">→</div>
 
-          <div className="journeyStep select">
-            <div className="journeyIcon starIcon">☆</div>
+          <div className="fpLevel fpSelect">
+            <div className="fpLevelIcon fpStar">☆</div>
             <strong>SELECT</strong>
           </div>
         </section>
 
-        {/* INTRO */}
-        <section className="intro">
-          <div className="eyebrow">
+        <section className="fpIntro">
+          <div className="fpEyebrow">
             {isSignIn ? "WELCOME BACK" : "WELCOME TO FLIGHT PATH"}
           </div>
 
-          <h2>
+          <h1>
             {isSignIn
               ? "Your player's journey continues."
               : "Start tracking the journey."}
-          </h2>
+          </h1>
 
           <p>
             {isSignIn
@@ -131,17 +133,12 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
           </p>
         </section>
 
-        {/* AUTH */}
-        <section className="authCard">
-          <div className="modeTabs">
+        <section className="fpCard">
+          <div className="fpTabs">
             <button
               type="button"
               className={isSignIn ? "active" : ""}
-              onClick={() => {
-                setMode("signin");
-                setMessage("");
-                setError("");
-              }}
+              onClick={() => switchMode("signin")}
             >
               SIGN IN
             </button>
@@ -149,18 +146,14 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
             <button
               type="button"
               className={!isSignIn ? "active" : ""}
-              onClick={() => {
-                setMode("signup");
-                setMessage("");
-                setError("");
-              }}
+              onClick={() => switchMode("signup")}
             >
               CREATE ACCOUNT
             </button>
           </div>
 
           <form onSubmit={handleSubmit}>
-            <label className="field">
+            <label className="fpField">
               <span>EMAIL</span>
 
               <input
@@ -173,10 +166,10 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
               />
             </label>
 
-            <label className="field">
+            <label className="fpField">
               <span>PASSWORD</span>
 
-              <div className="passwordField">
+              <div className="fpPasswordWrap">
                 <input
                   type={showPassword ? "text" : "password"}
                   required
@@ -191,10 +184,9 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
 
                 <button
                   type="button"
-                  className="showPassword"
-                  onClick={() => setShowPassword((current) => !current)}
-                  aria-label={
-                    showPassword ? "Hide password" : "Show password"
+                  className="fpShowPassword"
+                  onClick={() =>
+                    setShowPassword((current) => !current)
                   }
                 >
                   {showPassword ? "HIDE" : "SHOW"}
@@ -202,22 +194,22 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
               </div>
             </label>
 
-            {error && (
-              <div className="message errorMessage">
+            {error ? (
+              <div className="fpMessage fpError">
                 {error}
               </div>
-            )}
+            ) : null}
 
-            {message && (
-              <div className="message successMessage">
+            {message ? (
+              <div className="fpMessage fpSuccess">
                 {message}
               </div>
-            )}
+            ) : null}
 
             <button
               type="submit"
               disabled={loading}
-              className="primaryButton"
+              className="fpPrimary"
             >
               {loading ? (
                 "PLEASE WAIT..."
@@ -233,10 +225,9 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
           </form>
         </section>
 
-        {/* TRUST */}
-        <section className="trustSection">
-          <div className="trustItem">
-            <div className="trustIcon">◇</div>
+        <section className="fpTrust">
+          <div className="fpTrustItem">
+            <div className="fpTrustIcon">◇</div>
 
             <div>
               <strong>YOUR DATA</strong>
@@ -244,8 +235,8 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
             </div>
           </div>
 
-          <div className="trustItem">
-            <div className="trustIcon">☁</div>
+          <div className="fpTrustItem">
+            <div className="fpTrustIcon">☁</div>
 
             <div>
               <strong>SAVED IN THE CLOUD</strong>
@@ -253,8 +244,8 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
             </div>
           </div>
 
-          <div className="trustItem">
-            <div className="trustIcon">◎</div>
+          <div className="fpTrustItem">
+            <div className="fpTrustIcon">◎</div>
 
             <div>
               <strong>BUILT FOR FLY FAMILIES</strong>
@@ -263,26 +254,13 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
           </div>
         </section>
 
-        <footer>
+        <footer className="fpFooter">
           <strong>THE FLY ACADEMY</strong>
           <span>PREPARE FOR TAKEOFF.</span>
         </footer>
       </section>
 
       <style>{`
-        :root {
-          --black: #000000;
-          --panel: #0b0b0d;
-          --white: #ffffff;
-          --muted: #9a9aa0;
-          --line: #29292f;
-
-          --purple: #7024ad;
-          --purpleBright: #a54df2;
-          --gold: #d49a19;
-          --cyan: #00b5c9;
-        }
-
         * {
           box-sizing: border-box;
         }
@@ -290,7 +268,7 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
         html,
         body {
           margin: 0;
-          background: #000;
+          background: #000000;
         }
 
         button,
@@ -298,467 +276,325 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
           font: inherit;
         }
 
-        .authPage {
+        .fpAuthPage {
           min-height: 100vh;
-
+          width: 100%;
           display: flex;
           justify-content: center;
-
-          padding:
-            max(30px, env(safe-area-inset-top))
-            20px
-            max(28px, env(safe-area-inset-bottom));
-
           background:
             radial-gradient(
-              circle at 50% -10%,
-              #191919 0%,
-              #070707 33%,
-              #000 65%
+              circle at 50% -8%,
+              #181818 0%,
+              #080808 34%,
+              #000000 67%
             );
-
-          color: white;
-
+          color: #ffffff;
+          padding:
+            max(28px, env(safe-area-inset-top))
+            18px
+            max(28px, env(safe-area-inset-bottom));
           font-family:
             Arial,
             Helvetica,
             sans-serif;
         }
 
-        .authShell {
+        .fpAuthShell {
           width: 100%;
           max-width: 430px;
+          margin: 0 auto;
         }
 
-        /* BRAND */
-
-        .brandBlock {
+        .fpBrand {
           text-align: center;
           padding-top: 8px;
         }
 
-        .academyLabel {
-          color: #929298;
-
+        .fpAcademy {
+          color: #a0a0a5;
           font-size: 11px;
           font-weight: 800;
-
-          letter-spacing: .27em;
-
-          margin-bottom: 11px;
-        }
-
-        .brandRow {
-          display: flex;
-          justify-content: center;
-          align-items: center;
-
-          gap: 10px;
-        }
-
-        .brandRow h1 {
-          margin: 0;
-
-          color: white;
-
-          font-size: 40px;
-          line-height: .95;
-
-          font-weight: 1000;
-          font-style: italic;
-
-          letter-spacing: -.055em;
-        }
-
-        .planeMark {
-          display: inline-block;
-
-          color: var(--gold);
-
-          font-size: 29px;
-
-          transform: rotate(-26deg);
-        }
-
-        .tagline {
-          margin-top: 13px;
-
-          color: #e5e5e7;
-
-          font-size: 12px;
-          font-weight: 900;
-
-          letter-spacing: .13em;
-        }
-
-        .tagline span {
-          color: var(--gold);
-        }
-
-        /* JOURNEY */
-
-        .journey {
-          display: grid;
-
-          grid-template-columns:
-            1fr
-            20px
-            1fr
-            20px
-            1fr
-            20px
-            1fr;
-
-          align-items: center;
-
-          margin-top: 30px;
-
-          padding:
-            18px
-            2px;
-
-          border-top:
-            1px solid #26262a;
-
-          border-bottom:
-            1px solid #202024;
-        }
-
-        .journeyStep {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-
-          gap: 7px;
-        }
-
-        .journeyIcon {
-          height: 31px;
-
-          display: flex;
-          align-items: center;
-          justify-content: center;
-
-          font-size: 30px;
-          line-height: 1;
-
-          font-weight: 900;
-        }
-
-        .journeyStep strong {
-          font-size: 10px;
-          font-weight: 1000;
-
-          letter-spacing: .055em;
-        }
-
-        .arrow {
-          color: #5f5f65;
-
-          text-align: center;
-
-          font-size: 16px;
-        }
-
-        .elevate {
-          color: var(--gold);
-        }
-
-        .ascend {
-          color: var(--purpleBright);
-        }
-
-        .air {
-          color: var(--cyan);
-        }
-
-        .select {
-          color: white;
-        }
-
-        .airIcon {
-          transform: rotate(-25deg);
-        }
-
-        .starIcon {
-          font-size: 34px;
-        }
-
-        /* INTRO */
-
-        .intro {
-          padding:
-            31px
-            4px
-            22px;
-        }
-
-        .eyebrow {
-          color: var(--purpleBright);
-
-          font-size: 11px;
-          font-weight: 900;
-
-          letter-spacing: .18em;
-
+          letter-spacing: 0.24em;
           margin-bottom: 10px;
         }
 
-        .intro h2 {
-          margin: 0;
-
-          color: #ffffff;
-
-          font-size: 30px;
-          line-height: 1.08;
-
-          font-weight: 950;
-
-          letter-spacing: -.025em;
+        .fpBrandRow {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 10px;
         }
 
-        .intro p {
-          margin:
-            12px
-            0
-            0;
+        .fpWordmark {
+          color: #ffffff;
+          font-size: clamp(36px, 10vw, 44px);
+          line-height: 0.95;
+          font-weight: 1000;
+          font-style: italic;
+          letter-spacing: -0.055em;
+        }
 
-          color: #a7a7ad;
+        .fpPlane {
+          color: #d59b21;
+          font-size: 30px;
+          line-height: 1;
+          transform: rotate(-26deg);
+        }
 
+        .fpTagline {
+          margin-top: 14px;
+          color: #eeeeef;
+          font-size: 12px;
+          line-height: 1.5;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+        }
+
+        .fpTagline span {
+          color: #d59b21;
+        }
+
+        .fpJourney {
+          display: grid;
+          grid-template-columns:
+            1fr 18px
+            1fr 18px
+            1fr 18px
+            1fr;
+          align-items: center;
+          margin-top: 30px;
+          padding: 19px 2px 18px;
+          border-top: 1px solid #28282c;
+          border-bottom: 1px solid #232327;
+        }
+
+        .fpLevel {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 7px;
+          min-width: 0;
+        }
+
+        .fpLevelIcon {
+          min-height: 33px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 30px;
+          line-height: 1;
+          font-weight: 900;
+        }
+
+        .fpLevel strong {
+          font-size: 11px;
+          line-height: 1;
+          font-weight: 1000;
+          letter-spacing: 0.035em;
+        }
+
+        .fpElevate {
+          color: #d59b21;
+        }
+
+        .fpAscend {
+          color: #a84df5;
+        }
+
+        .fpAir {
+          color: #00b8cc;
+        }
+
+        .fpSelect {
+          color: #ffffff;
+        }
+
+        .fpAirIcon {
+          transform: rotate(-25deg);
+        }
+
+        .fpStar {
+          font-size: 35px;
+        }
+
+        .fpArrow {
+          color: #66666c;
+          text-align: center;
+          font-size: 17px;
+        }
+
+        .fpIntro {
+          padding: 31px 4px 23px;
+        }
+
+        .fpEyebrow {
+          color: #a84df5;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.17em;
+          margin-bottom: 10px;
+        }
+
+        .fpIntro h1 {
+          margin: 0;
+          color: #ffffff;
+          font-size: clamp(29px, 7.5vw, 34px);
+          line-height: 1.08;
+          font-weight: 950;
+          letter-spacing: -0.025em;
+        }
+
+        .fpIntro p {
+          margin: 12px 0 0;
+          color: #b0b0b5;
           font-size: 14px;
           line-height: 1.55;
         }
 
-        /* AUTH CARD */
-
-        .authCard {
+        .fpCard {
           padding: 11px;
-
-          border:
-            1px solid
-            #303036;
-
+          border: 1px solid #303036;
           border-radius: 18px;
-
           background:
             linear-gradient(
               180deg,
               #101012,
               #080809
             );
-
           box-shadow:
-            0
-            20px
-            50px
-            rgba(0,0,0,.45);
+            0 20px 50px
+            rgba(0, 0, 0, 0.45);
         }
 
-        .modeTabs {
+        .fpTabs {
           display: grid;
           grid-template-columns: 1fr 1fr;
-
           gap: 5px;
-
           padding: 4px;
-
           margin-bottom: 20px;
-
           background: #050506;
-
-          border:
-            1px solid
-            #1f1f23;
-
+          border: 1px solid #202024;
           border-radius: 11px;
         }
 
-        .modeTabs button {
-          min-height: 47px;
-
+        .fpTabs button {
+          min-height: 48px;
           border: none;
           border-radius: 8px;
-
           background: transparent;
-
-          color: #77777d;
-
+          color: #7d7d83;
           font-size: 12px;
           font-weight: 900;
-
-          letter-spacing: .06em;
-
+          letter-spacing: 0.055em;
           cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
         }
 
-        .modeTabs button.active {
-          color: white;
-
+        .fpTabs button.active {
+          color: #ffffff;
           background:
             linear-gradient(
               180deg,
-              #202023,
+              #222225,
               #151517
             );
-
           box-shadow:
-            inset
-            0
-            0
-            0
-            1px
-            rgba(255,255,255,.08);
+            inset 0 0 0 1px
+            rgba(255, 255, 255, 0.08);
         }
 
-        form {
-          padding:
-            0
-            5px
-            5px;
-        }
-
-        .field {
+        .fpField {
           display: block;
-
           margin-bottom: 16px;
         }
 
-        .field > span {
+        .fpField > span {
           display: block;
-
-          margin:
-            0
-            0
-            8px
-            2px;
-
-          color: #a5a5aa;
-
+          margin: 0 0 8px 2px;
+          color: #b2b2b7;
           font-size: 11px;
           font-weight: 900;
-
-          letter-spacing: .14em;
+          letter-spacing: 0.13em;
         }
 
-        .field input {
+        .fpField input {
           width: 100%;
-          height: 54px;
-
-          border:
-            1px solid
-            #36363b;
-
+          height: 55px;
+          display: block;
+          border: 1px solid #37373c;
           border-radius: 10px;
-
           outline: none;
-
           background: #0c0c0e;
-
-          color: white;
-
-          padding:
-            0
-            15px;
-
+          color: #ffffff;
+          padding: 0 15px;
           font-size: 16px;
         }
 
-        .field input::placeholder {
-          color: #64646a;
+        .fpField input::placeholder {
+          color: #67676c;
         }
 
-        .field input:focus {
-          border-color: #8d3ed2;
-
+        .fpField input:focus {
+          border-color: #8e3cd4;
           box-shadow:
-            0
-            0
-            0
-            3px
-            rgba(141,62,210,.13);
+            0 0 0 3px
+            rgba(142, 60, 212, 0.14);
         }
 
-        .passwordField {
+        .fpPasswordWrap {
           position: relative;
         }
 
-        .passwordField input {
-          padding-right: 70px;
+        .fpPasswordWrap input {
+          padding-right: 74px;
         }
 
-        .showPassword {
+        .fpShowPassword {
           position: absolute;
-
           top: 0;
           right: 5px;
-
-          height: 54px;
-
-          padding:
-            0
-            11px;
-
+          height: 55px;
+          padding: 0 11px;
           border: none;
-
           background: transparent;
-
-          color: #a5a5aa;
-
+          color: #b0b0b5;
           font-size: 10px;
           font-weight: 900;
-
-          letter-spacing: .07em;
-
+          letter-spacing: 0.07em;
           cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
         }
 
-        .message {
+        .fpMessage {
           margin-bottom: 16px;
-
           padding: 12px;
-
           border-radius: 9px;
-
           font-size: 13px;
           line-height: 1.45;
         }
 
-        .errorMessage {
-          background: #351010;
-
-          border:
-            1px solid
-            #762020;
-
-          color: #ffb5b5;
+        .fpError {
+          background: #341010;
+          border: 1px solid #742020;
+          color: #ffb6b6;
         }
 
-        .successMessage {
+        .fpSuccess {
           background: #102817;
-
-          border:
-            1px solid
-            #235b32;
-
+          border: 1px solid #235b32;
           color: #b9f7c7;
         }
 
-        .primaryButton {
+        .fpPrimary {
           width: 100%;
-          min-height: 58px;
-
-          border:
-            1px solid
-            #9846e5;
-
+          min-height: 59px;
+          border: 1px solid #9b48e8;
           border-radius: 10px;
-
           display: flex;
           justify-content: center;
           align-items: center;
-
           gap: 11px;
-
           background:
             linear-gradient(
               110deg,
@@ -766,59 +602,140 @@ export default function FlightPathAuth({ onSignedIn }: Props) {
               #7024ad 52%,
               #42116f
             );
-
-          color: white;
-
+          color: #ffffff;
           font-size: 13px;
           font-weight: 950;
-
-          letter-spacing: .075em;
-
+          letter-spacing: 0.07em;
           cursor: pointer;
+          box-shadow:
+            inset 0 0 18px
+            rgba(255, 255, 255, 0.04),
+            0 0 22px
+            rgba(112, 36, 173, 0.13);
+          -webkit-tap-highlight-color: transparent;
         }
 
-        .primaryButton span {
+        .fpPrimary span {
           font-size: 20px;
           font-weight: 400;
         }
 
-        .primaryButton:active {
-          transform: scale(.985);
+        .fpPrimary:active {
+          transform: scale(0.985);
           filter: brightness(1.18);
         }
 
-        .primaryButton:disabled {
-          opacity: .65;
+        .fpPrimary:disabled {
+          opacity: 0.65;
           cursor: default;
         }
 
-        /* TRUST */
-
-        .trustSection {
+        .fpTrust {
           display: grid;
           grid-template-columns: 1fr;
-
-          gap: 13px;
-
+          gap: 14px;
           margin-top: 25px;
-
-          padding-top: 21px;
-
-          border-top:
-            1px solid
-            #252529;
+          padding: 21px 4px 0;
+          border-top: 1px solid #27272b;
         }
 
-        .trustItem {
+        .fpTrustItem {
           display: flex;
           align-items: center;
-
           gap: 12px;
-
-          padding:
-            0
-            4px;
         }
 
-        .trustIcon {
-          width
+        .fpTrustIcon {
+          flex: 0 0 auto;
+          width: 38px;
+          height: 38px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid #59267d;
+          border-radius: 9px;
+          color: #ad55f4;
+          font-size: 20px;
+          background: #09090a;
+        }
+
+        .fpTrustItem > div:last-child {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .fpTrustItem strong {
+          color: #f1f1f2;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.07em;
+        }
+
+        .fpTrustItem span {
+          margin-top: 3px;
+          color: #8f8f95;
+          font-size: 12px;
+          line-height: 1.35;
+        }
+
+        .fpFooter {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 5px;
+          padding-top: 28px;
+        }
+
+        .fpFooter strong {
+          color: #c8c8cc;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.19em;
+        }
+
+        .fpFooter span {
+          color: #707076;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.14em;
+        }
+
+        @media (max-width: 380px) {
+          .fpAuthPage {
+            padding-left: 14px;
+            padding-right: 14px;
+          }
+
+          .fpWordmark {
+            font-size: 35px;
+          }
+
+          .fpPlane {
+            font-size: 26px;
+          }
+
+          .fpTagline {
+            font-size: 11px;
+            letter-spacing: 0.075em;
+          }
+
+          .fpJourney {
+            grid-template-columns:
+              1fr 14px
+              1fr 14px
+              1fr 14px
+              1fr;
+          }
+
+          .fpLevel strong {
+            font-size: 10px;
+          }
+
+          .fpIntro h1 {
+            font-size: 28px;
+          }
+        }
+      `}</style>
+    </main>
+  );
+}
