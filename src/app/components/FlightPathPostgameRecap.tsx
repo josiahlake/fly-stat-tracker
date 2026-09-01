@@ -292,58 +292,68 @@ export default function FlightPathPostgameRecap({
   }, [data]);
 
   async function shareGame() {
-    if (!data || !derived) return;
+  if (!data || !derived) return;
 
-    const playerName =
-      `${data.firstName} ${data.lastName}`.trim();
+  const playerName =
+    `${data.firstName} ${data.lastName}`.trim();
 
-    const score =
-      data.flyScore !== null &&
-      data.opponentScore !== null
-        ? `${data.result ?? ""} ${data.flyScore}-${data.opponentScore}`
-        : "";
+  const score =
+    data.flyScore !== null &&
+    data.opponentScore !== null
+      ? `${data.result ?? ""} ${data.flyScore}-${data.opponentScore}`
+      : "";
 
-    const text =
-      `FLIGHT PATH\n\n` +
-      `${playerName}` +
-      `${data.jerseyNumber ? ` #${data.jerseyNumber}` : ""}\n` +
-      `vs. ${data.opponentName}\n` +
-      `${score}\n\n` +
-      `${derived.points} PTS · ` +
-      `${data.rebounds} REB · ` +
-      `${data.assists} AST · ` +
-      `${data.steals} STL\n\n` +
-      `2PT ${data.twoMade}-${derived.twoAttempts} · ` +
-      `3PT ${data.threeMade}-${derived.threeAttempts} · ` +
-      `FT ${data.ftMade}-${derived.ftAttempts}\n` +
-      `Playing Time ${formatClock(data.playingSeconds)}`;
+  const text =
+    `FLIGHT PATH\n\n` +
+    `${playerName}` +
+    `${data.jerseyNumber ? ` #${data.jerseyNumber}` : ""}\n` +
+    `vs. ${data.opponentName}\n` +
+    `${score}\n\n` +
+    `${derived.points} PTS · ` +
+    `${data.rebounds} REB · ` +
+    `${data.assists} AST · ` +
+    `${data.steals} STL\n\n` +
+    `2PT ${data.twoMade}-${derived.twoAttempts} · ` +
+    `3PT ${data.threeMade}-${derived.threeAttempts} · ` +
+    `FT ${data.ftMade}-${derived.ftAttempts}\n` +
+    `Playing Time ${formatClock(data.playingSeconds)}`;
 
-    try {
-      if (
-        typeof navigator !== "undefined" &&
-        "share" in navigator
-      ) {
-        await navigator.share({
-          title: `${playerName} · Flight Path`,
-          text,
-        });
-      } else if (
-        typeof navigator !== "undefined" &&
-        navigator.clipboard
-      ) {
-        await navigator.clipboard.writeText(text);
+  try {
+    if (
+      typeof navigator !== "undefined" &&
+      typeof navigator.share === "function"
+    ) {
+      await navigator.share({
+        title: `${playerName} · Flight Path`,
+        text,
+      });
 
-        alert(
-          "Game summary copied. You can paste it into a text or email."
-        );
-      }
-    } catch (error) {
-      console.error(
-        "Share cancelled or unavailable:",
-        error
-      );
+      return;
     }
+
+    if (
+      typeof navigator !== "undefined" &&
+      typeof navigator.clipboard?.writeText === "function"
+    ) {
+      await navigator.clipboard.writeText(text);
+
+      alert(
+        "Game summary copied. You can paste it into a text or email."
+      );
+
+      return;
+    }
+
+    alert(
+      "Sharing is not available in this browser yet."
+    );
+  } catch (error) {
+    console.error(
+      "Share cancelled or unavailable:",
+      error
+    );
   }
+}
 
   if (loading) {
     return (
