@@ -59,6 +59,7 @@ type Props = {
   playerId: string;
   onStartGame?: () => void;
   onOpenLog?: () => void;
+  onOpenPath?: () => void;
 };
 
 function extractLevel(teamName: string | null) {
@@ -145,6 +146,7 @@ export default function FlightPathPlayerHome({
   playerId,
   onStartGame,
   onOpenLog,
+  onOpenPath,
 }: Props) {
   const [data, setData] = useState<PlayerHomeData | null>(null);
   const [liveGame, setLiveGame] = useState<LiveGameDraft | null>(null);
@@ -736,7 +738,7 @@ export default function FlightPathPlayerHome({
             <small>TRACK</small>
           </button>
 
-          <NavItem icon="➤" label="PATH" />
+          <NavItem icon="➤" label="PATH" onClick={onOpenPath} />
 
           <NavItem icon="♙" label="PLAYER" />
         </nav>
