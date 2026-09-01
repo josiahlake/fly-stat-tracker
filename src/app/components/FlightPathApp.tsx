@@ -116,9 +116,14 @@ export default function FlightPathApp() {
     );
   }
 
-  if (appState === "tracking-game" && playerId) {
-    return <GameTracker />;
-  }
+if (appState === "tracking-game" && playerId) {
+  return (
+    <GameTracker
+      playerId={playerId}
+      onGameSaved={() => setAppState("has-player")}
+    />
+  );
+}
 
   return null;
 }
