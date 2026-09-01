@@ -2,14 +2,10 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
-/**
- * Fly Stat Tracker (Single Player)
- * - Tap big buttons during game (made/miss 2PT, 3PT, FT + ORB/DRB/AST/TO/STL/FOUL)
- * - Save game (stored locally)
- * - Player Log: season-to-date averages + per-game list (filter by player)
- * - Two horizontal tile rows (7 across on desktop; responsive on phone)
- * - Tap feedback: quick flash + optional vibration
- */
+
+/* =========================================================
+   FLIGHT PATH — LIVE GAME TRACKER
+   ========================================================= */
 
 type LiveCounts = {
   made2: number;
@@ -27,59 +23,37 @@ type LiveCounts = {
   pf: number;
 };
 
-type GameEntry = {
-  id: string;
-  createdAt: number;
-  date: string; // YYYY-MM-DD
-  team: string;
-  opponent: string;
-  playerName: string;
-  notes?: string;
+type Action =
+  | { kind: "inc"; key: keyof LiveCounts }
+  | { kind: "dec"; key: keyof LiveCounts };
 
+type GameDraft = {
+  updatedAt: number;
+  date: string;
+  opponent: string;
+  notes: string;
   counts: LiveCounts;
 };
 
-type Action =
-  | { kind: "inc"; key: keyof LiveCounts }
-  | { kind: "dec"; key: keyof LiveCounts }
-  | { kind: "reset" };
+type PlayerContext = {
+  firstName: string;
+  lastName: string;
+  fullName: string;
 
-const STORAGE_KEY = "flyStatTracker.games.v2";
+  jerseyNumber: string;
+  teamName: string;
+  seasonName: string;
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
+  membershipId: string | null;
+};
 
-function todayISO() {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
+type GameTrackerProps = {
+  playerId: string;
+  onGameSaved?: () => void;
+  onExitGame?: () => void;
+};
 
-function safeParse<T>(json: string | null, fallback: T): T {
-  try {
-    if (!json) return fallback;
-    return JSON.parse(json) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function pct(made: number, att: number) {
-  if (!att) return 0;
-  return (made / att) * 100;
-}
-
-function formatPct(v: number) {
-  return `${v.toFixed(1)}%`;
-}
-
-function makeId() {
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function clampNonNeg(n: number) {
-  return Math.max(0, n);
-}
+type SaveState = "saved" | "saving" | "error";
 
 const emptyCounts: LiveCounts = {
   made2: 0,
@@ -96,24 +70,62 @@ const emptyCounts: LiveCounts = {
   pf: 0,
 };
 
-function sumCounts(a: LiveCounts, b: LiveCounts): LiveCounts {
-  const out: any = {};
-  (Object.keys(emptyCounts) as (keyof LiveCounts)[]).forEach((k) => {
-    out[k] = a[k] + b[k];
-  });
-  return out as LiveCounts;
+/* =========================================================
+   HELPERS
+   ========================================================= */
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
 }
 
-function avg(numerator: number, denom: number) {
-  if (!denom) return 0;
-  return numerator / denom;
+function todayISO() {
+  const d = new Date();
+
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(
+    d.getDate()
+  )}`;
 }
 
-function StatChip({ label, value }: { label: string; value: React.ReactNode }) {
+function pct(made: number, attempts: number) {
+  if (!attempts) return 0;
+  return (made / attempts) * 100;
+}
+
+function formatPct(value: number) {
+  return `${value.toFixed(1)}%`;
+}
+
+function clampNonNeg(value: number) {
+  return Math.max(0, value);
+}
+
+function formatPlayerName(firstName: string, lastName: string) {
+  return `${firstName || ""} ${lastName || ""}`.trim();
+}
+
+function hasAnyStats(counts: LiveCounts) {
+  return Object.values(counts).some((value) => Number(value) > 0);
+}
+
+/* =========================================================
+   SMALL UI COMPONENTS
+   ========================================================= */
+
+function StatTile({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: React.ReactNode;
+  detail?: string;
+}) {
   return (
-    <div className="chip">
-      <div className="chipLabel">{label}</div>
-      <div className="chipValue">{value}</div>
+    <div className="fpStatTile">
+      <div className="fpStatLabel">{label}</div>
+      <div className="fpStatValue">{value}</div>
+
+      {detail ? <div className="fpStatDetail">{detail}</div> : null}
     </div>
   );
 }
@@ -123,537 +135,942 @@ function TapButton({
   activeId,
   onTap,
   title,
-  sub,
-  tone,
+  subtitle,
+  variant,
 }: {
   id: string;
   activeId: string | null;
   onTap: () => void;
   title: string;
-  sub: string;
-  tone: "good" | "bad" | "neutral";
+  subtitle: string;
+  variant: "make" | "miss" | "neutral";
 }) {
-  const cls =
-    "tapBtn " +
-    (tone === "good" ? "tapBtnGood " : "") +
-    (tone === "bad" ? "tapBtnBad " : "tapBtnNeutral ") +
-    (activeId === id ? "tapBtnActive" : "");
+  const className = [
+    "fpTapButton",
+    variant === "make" ? "fpTapMake" : "",
+    variant === "miss" ? "fpTapMiss" : "",
+    variant === "neutral" ? "fpTapNeutral" : "",
+    activeId === id ? "fpTapActive" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <button className={cls} onClick={onTap} type="button">
-      <div className="tapBtnTitle">{title}</div>
-      <div className="tapBtnSub">{sub}</div>
+    <button className={className} type="button" onClick={onTap}>
+      <div className="fpTapTitle">{title}</div>
+      <div className="fpTapSubtitle">{subtitle}</div>
     </button>
   );
 }
-type GameTrackerProps = {
-  playerId: string;
-  onGameSaved?: () => void;
-  onExitGame?: () => void;
-};
 
-type GameDraft = {
-  updatedAt: number;
-  date: string;
-  opponent: string;
-  notes: string;
-  counts: LiveCounts;
-};
+/* =========================================================
+   TRACKER
+   ========================================================= */
+
 export default function GameTracker({
   playerId,
   onGameSaved,
   onExitGame,
 }: GameTrackerProps) {
-  const [games, setGames] = useState<GameEntry[]>([]);
-  const [counts, setCounts] = useState<LiveCounts>({ ...emptyCounts });
+  /* ---------------------------------------------------------
+     PLAYER
+     --------------------------------------------------------- */
 
-  const [date, setDate] = useState<string>(todayISO());
-  const [team, setTeam] = useState<string>("Fly Academy");
-  const [opponent, setOpponent] = useState<string>("");
-  const [playerName, setPlayerName] = useState<string>("");
-  const [notes, setNotes] = useState<string>("");
+  const [player, setPlayer] = useState<PlayerContext>({
+    firstName: "",
+    lastName: "",
+    fullName: "",
+    jerseyNumber: "",
+    teamName: "",
+    seasonName: "",
+    membershipId: null,
+  });
 
-  const [selectedPlayer, setSelectedPlayer] = useState<string>("");
-  const [lastTapId, setLastTapId] = useState<string | null>(null);
+  const [playerLoading, setPlayerLoading] = useState(true);
+  const [playerError, setPlayerError] = useState("");
+
+  /* ---------------------------------------------------------
+     GAME
+     --------------------------------------------------------- */
+
+  const [date, setDate] = useState(todayISO());
+  const [opponent, setOpponent] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const [counts, setCounts] = useState<LiveCounts>({
+    ...emptyCounts,
+  });
+
+  /* ---------------------------------------------------------
+     UI STATE
+     --------------------------------------------------------- */
+
   const [history, setHistory] = useState<Action[]>([]);
-  const [vibOn, setVibOn] = useState<boolean>(true);
+  const [lastTapId, setLastTapId] = useState<string | null>(null);
 
-  const mountedRef = useRef(false);
+  const [vibOn, setVibOn] = useState(true);
 
   const [draftReady, setDraftReady] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [manualSaveMessage, setManualSaveMessage] = useState("");
 
-  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [finalizing, setFinalizing] = useState(false);
+
+  const draftTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const tapTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const messageTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const DRAFT_KEY = `flightPath.gameDraft.${playerId}`;
-  
-  // Step 1 support: stable tap flash timeout
-  const tapTimeoutRef = useRef<number | null>(null);
 
-  // Optional vibration toggle (default ON)
-  const [vibrationOn, setVibrationOn] = useState<boolean>(true);
+  /* =========================================================
+     LOAD PLAYER CONTEXT
+     ========================================================= */
 
-  // Load games once
   useEffect(() => {
-    const loaded = safeParse<GameEntry[]>(
-      typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null,
-      []
-    );
-    setGames(Array.isArray(loaded) ? loaded : []);
-    mountedRef.current = true;
-  }, []);
+    let cancelled = false;
 
-  // Persist games
-  useEffect(() => {
-    if (!mountedRef.current) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(games));
-  }, [games]);
-// --------------------------------------------------
-// FLIGHT PATH: restore unfinished live game
-// --------------------------------------------------
-
-useEffect(() => {
-  let cancelled = false;
-
-  async function restoreDraft() {
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setDraftReady(true);
-        return;
-      }
-
-      let localDraft: GameDraft | null = null;
+    async function loadPlayerContext() {
+      setPlayerLoading(true);
+      setPlayerError("");
 
       try {
-        const raw = localStorage.getItem(DRAFT_KEY);
+        /*
+         * 1. PLAYER PROFILE
+         */
+        const {
+          data: playerRow,
+          error: playerQueryError,
+        } = await supabase
+          .from("flight_players")
+          .select("id, first_name, last_name")
+          .eq("id", playerId)
+          .single();
 
-        if (raw) {
-          localDraft = JSON.parse(raw) as GameDraft;
+        if (playerQueryError) {
+          throw playerQueryError;
         }
-      } catch (error) {
-        console.error("Could not read local Flight Path draft:", error);
-      }
 
-      const { data: cloudDraft, error } = await supabase
-        .from("flight_game_drafts")
-        .select("*")
-        .eq("player_id", playerId)
-        .eq("user_id", user.id)
-        .maybeSingle();
+        /*
+         * 2. MOST RECENT TEAM MEMBERSHIP
+         */
+        const {
+          data: membershipRows,
+          error: membershipError,
+        } = await supabase
+          .from("flight_team_memberships")
+          .select(
+            "id, player_id, team_id, season_id, jersey_number"
+          )
+          .eq("player_id", playerId)
+          .limit(10);
 
-      if (error) {
-        console.error("Could not load cloud Flight Path draft:", error);
-      }
+        if (membershipError) {
+          console.error(
+            "Could not load Flight Path membership:",
+            membershipError
+          );
+        }
 
-      if (cancelled) return;
+        const membership =
+          membershipRows && membershipRows.length > 0
+            ? membershipRows[0]
+            : null;
 
-      const cloudUpdatedAt = cloudDraft?.updated_at
-        ? new Date(cloudDraft.updated_at).getTime()
-        : 0;
+        let teamName = "";
+        let seasonName = "";
 
-      const localUpdatedAt = localDraft?.updatedAt ?? 0;
+        /*
+         * 3. TEAM
+         */
+        if (membership?.team_id) {
+          const { data: teamRow, error: teamError } =
+            await supabase
+              .from("teams")
+              .select("id, name")
+              .eq("id", membership.team_id)
+              .maybeSingle();
 
-      if (cloudDraft && cloudUpdatedAt > localUpdatedAt) {
-        setDate(cloudDraft.game_date || todayISO());
-        setOpponent(cloudDraft.opponent_name || "");
-        setNotes(cloudDraft.game_note || "");
+          if (teamError) {
+            console.error(
+              "Could not load Flight Path team:",
+              teamError
+            );
+          }
 
-        setCounts({
-          made2: cloudDraft.two_pt_made ?? 0,
-          miss2: cloudDraft.two_pt_missed ?? 0,
-          made3: cloudDraft.three_pt_made ?? 0,
-          miss3: cloudDraft.three_pt_missed ?? 0,
-          madeFT: cloudDraft.ft_made ?? 0,
-          missFT: cloudDraft.ft_missed ?? 0,
-          orb: cloudDraft.offensive_rebounds ?? 0,
-          drb: cloudDraft.defensive_rebounds ?? 0,
-          ast: cloudDraft.assists ?? 0,
-          to: cloudDraft.turnovers ?? 0,
-          stl: cloudDraft.steals ?? 0,
-          pf: cloudDraft.fouls ?? 0,
+          teamName = teamRow?.name || "";
+        }
+
+        /*
+         * 4. SEASON
+         */
+        if (membership?.season_id) {
+          const { data: seasonRow, error: seasonError } =
+            await supabase
+              .from("seasons")
+              .select("id, name")
+              .eq("id", membership.season_id)
+              .maybeSingle();
+
+          if (seasonError) {
+            console.error(
+              "Could not load Flight Path season:",
+              seasonError
+            );
+          }
+
+          seasonName = seasonRow?.name || "";
+        }
+
+        if (cancelled) return;
+
+        const firstName = playerRow?.first_name || "";
+        const lastName = playerRow?.last_name || "";
+
+        setPlayer({
+          firstName,
+          lastName,
+
+          fullName:
+            formatPlayerName(firstName, lastName) || "PLAYER",
+
+          jerseyNumber:
+            membership?.jersey_number !== null &&
+            membership?.jersey_number !== undefined
+              ? String(membership.jersey_number)
+              : "",
+
+          teamName,
+          seasonName,
+
+          membershipId: membership?.id
+            ? String(membership.id)
+            : null,
         });
-      } else if (localDraft) {
-        setDate(localDraft.date || todayISO());
-        setOpponent(localDraft.opponent || "");
-        setNotes(localDraft.notes || "");
-        setCounts(localDraft.counts);
-      }
-    } catch (error) {
-      console.error("Flight Path draft restore failed:", error);
-    } finally {
-      if (!cancelled) {
-        setDraftReady(true);
+      } catch (error) {
+        console.error(
+          "Could not load Flight Path player context:",
+          error
+        );
+
+        if (!cancelled) {
+          setPlayerError("Unable to load player information.");
+        }
+      } finally {
+        if (!cancelled) {
+          setPlayerLoading(false);
+        }
       }
     }
-  }
 
-  restoreDraft();
+    loadPlayerContext();
 
-  return () => {
-    cancelled = true;
-  };
-}, [playerId, DRAFT_KEY]);
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId]);
 
+  /* =========================================================
+     RESTORE UNFINISHED GAME
+     ========================================================= */
 
-// --------------------------------------------------
-// FLIGHT PATH: autosave unfinished live game
-// --------------------------------------------------
+  useEffect(() => {
+    let cancelled = false;
 
-useEffect(() => {
-  if (!draftReady) return;
+    async function restoreDraft() {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-  const localDraft: GameDraft = {
-    updatedAt: Date.now(),
+        /*
+         * Read local copy first.
+         */
+        let localDraft: GameDraft | null = null;
+
+        if (typeof window !== "undefined") {
+          try {
+            const raw = localStorage.getItem(DRAFT_KEY);
+
+            if (raw) {
+              localDraft = JSON.parse(raw) as GameDraft;
+            }
+          } catch (error) {
+            console.error(
+              "Could not read local Flight Path draft:",
+              error
+            );
+          }
+        }
+
+        /*
+         * If signed out, local draft can still restore.
+         */
+        if (!user) {
+          if (localDraft && !cancelled) {
+            setDate(localDraft.date || todayISO());
+            setOpponent(localDraft.opponent || "");
+            setNotes(localDraft.notes || "");
+            setCounts({
+              ...emptyCounts,
+              ...localDraft.counts,
+            });
+          }
+
+          if (!cancelled) {
+            setDraftReady(true);
+          }
+
+          return;
+        }
+
+        /*
+         * Read cloud draft.
+         */
+        const {
+          data: cloudDraft,
+          error: cloudDraftError,
+        } = await supabase
+          .from("flight_game_drafts")
+          .select("*")
+          .eq("player_id", playerId)
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (cloudDraftError) {
+          console.error(
+            "Could not load cloud Flight Path draft:",
+            cloudDraftError
+          );
+        }
+
+        if (cancelled) return;
+
+        const cloudUpdatedAt = cloudDraft?.updated_at
+          ? new Date(cloudDraft.updated_at).getTime()
+          : 0;
+
+        const localUpdatedAt =
+          localDraft?.updatedAt || 0;
+
+        /*
+         * Whichever copy is newest wins.
+         */
+        if (
+          cloudDraft &&
+          cloudUpdatedAt >= localUpdatedAt
+        ) {
+          setDate(
+            cloudDraft.game_date || todayISO()
+          );
+
+          setOpponent(
+            cloudDraft.opponent_name || ""
+          );
+
+          setNotes(
+            cloudDraft.game_note || ""
+          );
+
+          setCounts({
+            made2: cloudDraft.two_pt_made ?? 0,
+            miss2: cloudDraft.two_pt_missed ?? 0,
+
+            made3: cloudDraft.three_pt_made ?? 0,
+            miss3: cloudDraft.three_pt_missed ?? 0,
+
+            madeFT: cloudDraft.ft_made ?? 0,
+            missFT: cloudDraft.ft_missed ?? 0,
+
+            orb:
+              cloudDraft.offensive_rebounds ?? 0,
+
+            drb:
+              cloudDraft.defensive_rebounds ?? 0,
+
+            ast: cloudDraft.assists ?? 0,
+            to: cloudDraft.turnovers ?? 0,
+            stl: cloudDraft.steals ?? 0,
+            pf: cloudDraft.fouls ?? 0,
+          });
+        } else if (localDraft) {
+          setDate(
+            localDraft.date || todayISO()
+          );
+
+          setOpponent(
+            localDraft.opponent || ""
+          );
+
+          setNotes(
+            localDraft.notes || ""
+          );
+
+          setCounts({
+            ...emptyCounts,
+            ...localDraft.counts,
+          });
+        }
+      } catch (error) {
+        console.error(
+          "Flight Path draft restore failed:",
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setDraftReady(true);
+        }
+      }
+    }
+
+    restoreDraft();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [playerId, DRAFT_KEY]);
+
+  /* =========================================================
+     AUTO-SAVE LIVE GAME
+     ========================================================= */
+
+  useEffect(() => {
+    if (!draftReady) return;
+
+    const now = Date.now();
+
+    const localDraft: GameDraft = {
+      updatedAt: now,
+      date,
+      opponent,
+      notes,
+      counts: { ...counts },
+    };
+
+    /*
+     * SAFETY SAVE #1:
+     * Immediately persist on device after every change.
+     */
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify(localDraft)
+        );
+      } catch (error) {
+        console.error(
+          "Could not save local Flight Path draft:",
+          error
+        );
+      }
+    }
+
+    /*
+     * SAFETY SAVE #2:
+     * Cloud backup after brief debounce.
+     */
+    setSaveState("saving");
+
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+    }
+
+    draftTimerRef.current = setTimeout(
+      async () => {
+        try {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+
+          if (!user) {
+            setSaveState("saved");
+            return;
+          }
+
+          const { error } = await supabase
+            .from("flight_game_drafts")
+            .upsert(
+              {
+                player_id: playerId,
+                user_id: user.id,
+
+                game_date:
+                  date || todayISO(),
+
+                opponent_name:
+                  opponent.trim(),
+
+                game_note:
+                  notes.trim() || null,
+
+                two_pt_made:
+                  counts.made2,
+
+                two_pt_missed:
+                  counts.miss2,
+
+                three_pt_made:
+                  counts.made3,
+
+                three_pt_missed:
+                  counts.miss3,
+
+                ft_made:
+                  counts.madeFT,
+
+                ft_missed:
+                  counts.missFT,
+
+                offensive_rebounds:
+                  counts.orb,
+
+                defensive_rebounds:
+                  counts.drb,
+
+                assists:
+                  counts.ast,
+
+                steals:
+                  counts.stl,
+
+                turnovers:
+                  counts.to,
+
+                blocks: 0,
+
+                fouls:
+                  counts.pf,
+
+                playing_seconds: 0,
+              },
+              {
+                onConflict:
+                  "player_id,user_id",
+              }
+            );
+
+          if (error) {
+            throw error;
+          }
+
+          setSaveState("saved");
+        } catch (error) {
+          console.error(
+            "Flight Path cloud draft sync failed:",
+            error
+          );
+
+          /*
+           * Local copy is still protected.
+           */
+          setSaveState("error");
+        }
+      },
+      400
+    );
+
+    return () => {
+      if (draftTimerRef.current) {
+        clearTimeout(
+          draftTimerRef.current
+        );
+      }
+    };
+  }, [
+    draftReady,
+    playerId,
+    DRAFT_KEY,
     date,
     opponent,
     notes,
     counts,
-  };
+  ]);
 
-  try {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(localDraft));
-  } catch (error) {
-    console.error("Could not save local Flight Path draft:", error);
-  }
+  /* =========================================================
+     DERIVED GAME STATS
+     ========================================================= */
 
-  if (draftTimerRef.current) {
-    clearTimeout(draftTimerRef.current);
-  }
-
-  draftTimerRef.current = setTimeout(async () => {
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) return;
-
-      const { error } = await supabase
-        .from("flight_game_drafts")
-        .upsert(
-          {
-            player_id: playerId,
-            user_id: user.id,
-            game_date: date,
-            opponent_name: opponent.trim(),
-            game_note: notes.trim() || null,
-
-            two_pt_made: counts.made2,
-            two_pt_missed: counts.miss2,
-            three_pt_made: counts.made3,
-            three_pt_missed: counts.miss3,
-            ft_made: counts.madeFT,
-            ft_missed: counts.missFT,
-
-            offensive_rebounds: counts.orb,
-            defensive_rebounds: counts.drb,
-
-            assists: counts.ast,
-            steals: counts.stl,
-            turnovers: counts.to,
-            blocks: 0,
-            fouls: counts.pf,
-            playing_seconds: 0,
-          },
-          {
-            onConflict: "player_id,user_id",
-          }
-        );
-
-      if (error) {
-        console.error("Flight Path cloud draft sync failed:", error);
-      }
-    } catch (error) {
-      console.error("Flight Path cloud draft sync failed:", error);
-    }
-  }, 400);
-
-  return () => {
-    if (draftTimerRef.current) {
-      clearTimeout(draftTimerRef.current);
-    }
-  };
-}, [
-  draftReady,
-  playerId,
-  DRAFT_KEY,
-  date,
-  opponent,
-  notes,
-  counts,
-]);
-  // Keep selected player sensible
-  useEffect(() => {
-    const names = Array.from(new Set(games.map((g) => g.playerName).filter(Boolean))).sort();
-    const fallback = playerName.trim() || names[0] || "";
-    if (!selectedPlayer) setSelectedPlayer(fallback);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [games]);
-
-  // Derived stats (live)
   const scoring = useMemo(() => {
-    const fgm = counts.made2 + counts.made3;
-    const fga = counts.made2 + counts.miss2 + counts.made3 + counts.miss3;
+    const fgm =
+      counts.made2 + counts.made3;
 
-    const tpm = counts.made3;
-    const tpa = counts.made3 + counts.miss3;
+    const fga =
+      counts.made2 +
+      counts.miss2 +
+      counts.made3 +
+      counts.miss3;
 
-    const ftm = counts.madeFT;
-    const fta = counts.madeFT + counts.missFT;
+    const tpm =
+      counts.made3;
 
-    const pts = counts.made2 * 2 + counts.made3 * 3 + counts.madeFT;
+    const tpa =
+      counts.made3 +
+      counts.miss3;
+
+    const ftm =
+      counts.madeFT;
+
+    const fta =
+      counts.madeFT +
+      counts.missFT;
+
+    const points =
+      counts.made2 * 2 +
+      counts.made3 * 3 +
+      counts.madeFT;
 
     return {
-      pts,
+      points,
       fgm,
       fga,
       fgPct: pct(fgm, fga),
+
       tpm,
       tpa,
       tpPct: pct(tpm, tpa),
+
       ftm,
       fta,
       ftPct: pct(ftm, fta),
     };
   }, [counts]);
 
-  const ttlRebs = counts.orb + counts.drb;
+  const rebounds =
+    counts.orb + counts.drb;
 
-  // Player list + selected games
-  const playerNames = useMemo(() => {
-    const set = new Set<string>();
-    games.forEach((g) => {
-      if (g.playerName?.trim()) set.add(g.playerName.trim());
-    });
-    if (playerName.trim()) set.add(playerName.trim());
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [games, playerName]);
+  /* =========================================================
+     TAP FEEDBACK
+     ========================================================= */
 
-  const gamesForSelected = useMemo(() => {
-    const p = selectedPlayer.trim();
-    if (!p) return [];
-    return games
-      .filter((g) => g.playerName.trim() === p)
-      .sort((a, b) => b.createdAt - a.createdAt);
-  }, [games, selectedPlayer]);
-
-  // Season-to-date aggregates (selected player)
-  const season = useMemo(() => {
-    const total = gamesForSelected.reduce((acc, g) => sumCounts(acc, g.counts), { ...emptyCounts });
-    const n = gamesForSelected.length;
-
-    const fgm = total.made2 + total.made3;
-    const fga = total.made2 + total.miss2 + total.made3 + total.miss3;
-
-    const tpm = total.made3;
-    const tpa = total.made3 + total.miss3;
-
-    const ftm = total.madeFT;
-    const fta = total.madeFT + total.missFT;
-
-    const pts = total.made2 * 2 + total.made3 * 3 + total.madeFT;
-
-    const rpg = avg(total.orb + total.drb, n);
-    const orbg = avg(total.orb, n);
-    const drbg = avg(total.drb, n);
-
-    return {
-      games: n,
-      total,
-      ppg: avg(pts, n),
-      rpg,
-      orbg,
-      drbg,
-      apg: avg(total.ast, n),
-      topg: avg(total.to, n),
-      stlg: avg(total.stl, n),
-      pfpg: avg(total.pf, n),
-      fgPct: pct(fgm, fga),
-      tpPct: pct(tpm, tpa),
-      ftPct: pct(ftm, fta),
-    };
-  }, [gamesForSelected]);
-
-  // --- Tap feedback ---
-  const tapFeedback = (id: string) => {
+  function tapFeedback(id: string) {
     setLastTapId(id);
-    window.setTimeout(() => setLastTapId(null), 120);
-  
-    if (!vibOn) return;
-  
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-      // Most Android browsers support; iOS Safari often ignores vibration.
-      // @ts-ignore
-      navigator.vibrate(12);
+
+    if (tapTimerRef.current) {
+      clearTimeout(tapTimerRef.current);
     }
-  };  
 
-  // --- Actions ---
-  const inc = (key: keyof LiveCounts, tapId: string) => {
+    tapTimerRef.current = setTimeout(
+      () => setLastTapId(null),
+      120
+    );
+
+    if (!vibOn) return;
+
+    if (
+      typeof navigator !== "undefined" &&
+      "vibrate" in navigator
+    ) {
+      try {
+        navigator.vibrate(12);
+      } catch {
+        // iOS Safari generally ignores vibration.
+      }
+    }
+  }
+
+  /* =========================================================
+     STAT ACTIONS
+     ========================================================= */
+
+  function inc(
+    key: keyof LiveCounts,
+    tapId: string
+  ) {
     tapFeedback(tapId);
-    setCounts((c) => ({ ...c, [key]: c[key] + 1 }));
-    setHistory((h) => [...h, { kind: "inc", key }]);
-  };
 
-  const dec = (key: keyof LiveCounts) => {
-    setCounts((c) => ({ ...c, [key]: clampNonNeg(c[key] - 1) }));
-    setHistory((h) => [...h, { kind: "dec", key }]);
-  };
+    setCounts((current) => ({
+      ...current,
+      [key]: current[key] + 1,
+    }));
 
-  const undo = () => {
-    setHistory((h) => {
-      if (!h.length) return h;
-      const last = h[h.length - 1];
+    setHistory((current) => [
+      ...current,
+      {
+        kind: "inc",
+        key,
+      },
+    ]);
+  }
 
-      setCounts((c) => {
-        if (last.kind === "inc") {
-          return { ...c, [last.key]: clampNonNeg(c[last.key] - 1) };
-        }
-        if (last.kind === "dec") {
-          return { ...c, [last.key]: c[last.key] + 1 };
-        }
-        if (last.kind === "reset") {
-          return c;
-        }
-        return c;
-      });
-
-      return h.slice(0, -1);
-    });
-  };
-
-  const resetLive = () => {
-    setCounts({ ...emptyCounts });
-    setHistory((h) => [...h, { kind: "reset" }]);
-  };
-  const describeAction = (a: any) => {
-    // best effort label (won’t crash even if shape changes)
-    if (!a) return "last action";
-    if (a.kind === "inc") return `+${String(a.key || "").toUpperCase()}`;
-    if (a.kind === "dec") return `-${String(a.key || "").toUpperCase()}`;
-    return "RESET";
-  };
-
-  const confirmUndo = () => {
-    if (!history.length) return;
-
-    const last = history[history.length - 1];
-    const ok = window.confirm(
-      `Undo last action: ${describeAction(last)}?\n\nThis will revert your most recent tap.`
-    );
-    if (ok) undo();
-  };
-
-  const confirmReset = () => {
-    // Only bother confirming if there’s something to lose
-    const hasStats =
-      Object.values(counts).some((v) => Number(v) > 0) || history.length > 0;
-
-    if (!hasStats) return;
-
-    const who = (playerName || "").trim() || "this player";
-    const ok = window.confirm(
-      `Are you sure you want to clear ${who}'s live stats?\n\nThis will NOT delete saved games.`
-    );
-    if (ok) resetLive();
-  };
-
-  // --------------------------------------------------
-  // FLIGHT PATH: manual safety save
-  // --------------------------------------------------
-
-  const saveProgress = async () => {
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        alert("Please sign in again.");
-        return;
+  function undo() {
+    setHistory((currentHistory) => {
+      if (!currentHistory.length) {
+        return currentHistory;
       }
 
+      const last =
+        currentHistory[
+          currentHistory.length - 1
+        ];
+
+      setCounts((currentCounts) => {
+        if (last.kind === "inc") {
+          return {
+            ...currentCounts,
+
+            [last.key]: clampNonNeg(
+              currentCounts[last.key] - 1
+            ),
+          };
+        }
+
+        return {
+          ...currentCounts,
+
+          [last.key]:
+            currentCounts[last.key] + 1,
+        };
+      });
+
+      return currentHistory.slice(0, -1);
+    });
+  }
+
+  function confirmUndo() {
+    if (!history.length) return;
+
+    const confirmed =
+      window.confirm(
+        "Undo your last stat entry?"
+      );
+
+    if (confirmed) {
+      undo();
+    }
+  }
+
+  function resetLive() {
+    setCounts({
+      ...emptyCounts,
+    });
+
+    setHistory([]);
+  }
+
+  function confirmReset() {
+    if (
+      !hasAnyStats(counts) &&
+      history.length === 0
+    ) {
+      return;
+    }
+
+    const name =
+      player.fullName || "this player";
+
+    const confirmed =
+      window.confirm(
+        `Clear ${name}'s live game stats?\n\nThis cannot be undone.`
+      );
+
+    if (confirmed) {
+      resetLive();
+    }
+  }
+
+  /* =========================================================
+     MANUAL "SAVE PROGRESS"
+     ========================================================= */
+
+  async function saveProgress() {
+    try {
+      setSaveState("saving");
+
+      const now = Date.now();
+
       const localDraft: GameDraft = {
-        updatedAt: Date.now(),
+        updatedAt: now,
         date,
         opponent,
         notes,
         counts: { ...counts },
       };
 
-      // Save immediately on this device.
+      /*
+       * Save instantly on this device.
+       */
       if (typeof window !== "undefined") {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(localDraft));
+        localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify(localDraft)
+        );
       }
 
-      // Save immediately to Supabase.
+      /*
+       * Save instantly to cloud.
+       */
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setSaveState("saved");
+        showManualSaveMessage(
+          "Saved on this device."
+        );
+        return;
+      }
+
       const { error } = await supabase
         .from("flight_game_drafts")
         .upsert(
           {
             player_id: playerId,
             user_id: user.id,
-            game_date: date || todayISO(),
-            opponent_name: opponent.trim(),
-            game_note: notes.trim() || null,
 
-            two_pt_made: counts.made2,
-            two_pt_missed: counts.miss2,
+            game_date:
+              date || todayISO(),
 
-            three_pt_made: counts.made3,
-            three_pt_missed: counts.miss3,
+            opponent_name:
+              opponent.trim(),
 
-            ft_made: counts.madeFT,
-            ft_missed: counts.missFT,
+            game_note:
+              notes.trim() || null,
 
-            offensive_rebounds: counts.orb,
-            defensive_rebounds: counts.drb,
+            two_pt_made:
+              counts.made2,
 
-            assists: counts.ast,
-            steals: counts.stl,
-            turnovers: counts.to,
+            two_pt_missed:
+              counts.miss2,
+
+            three_pt_made:
+              counts.made3,
+
+            three_pt_missed:
+              counts.miss3,
+
+            ft_made:
+              counts.madeFT,
+
+            ft_missed:
+              counts.missFT,
+
+            offensive_rebounds:
+              counts.orb,
+
+            defensive_rebounds:
+              counts.drb,
+
+            assists:
+              counts.ast,
+
+            steals:
+              counts.stl,
+
+            turnovers:
+              counts.to,
 
             blocks: 0,
-            fouls: counts.pf,
+
+            fouls:
+              counts.pf,
+
             playing_seconds: 0,
           },
           {
-            onConflict: "player_id,user_id",
+            onConflict:
+              "player_id,user_id",
           }
         );
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
-      alert("Progress saved.");
+      setSaveState("saved");
+
+      showManualSaveMessage(
+        "Progress saved ✓"
+      );
     } catch (error) {
-      console.error("Could not save game progress:", error);
+      console.error(
+        "Could not save game progress:",
+        error
+      );
 
-      alert(
-        "We couldn't save your progress to the cloud. Your most recent stats should still be saved on this device."
+      /*
+       * Their local safety save should still exist.
+       */
+      setSaveState("error");
+
+      showManualSaveMessage(
+        "Saved on device. Cloud backup unavailable."
       );
     }
-  };
+  }
 
-  // --------------------------------------------------
-  // FLIGHT PATH: finalize completed game
-  // --------------------------------------------------
+  function showManualSaveMessage(
+    message: string
+  ) {
+    setManualSaveMessage(message);
 
-  const finalizeGame = async () => {
-    const confirmed = window.confirm(
-      "Finalize this game?\n\nThis will save the final stats to your player's Flight Path and close the live game."
-    );
+    if (messageTimerRef.current) {
+      clearTimeout(
+        messageTimerRef.current
+      );
+    }
+
+    messageTimerRef.current =
+      setTimeout(() => {
+        setManualSaveMessage("");
+      }, 2400);
+  }
+
+  /* =========================================================
+     EXIT WITHOUT ENDING GAME
+     ========================================================= */
+
+  async function exitGame() {
+    /*
+     * Force a safety save before leaving.
+     */
+    await saveProgress();
+
+    if (onExitGame) {
+      onExitGame();
+    }
+  }
+
+  /* =========================================================
+     FINALIZE GAME
+     ========================================================= */
+
+  async function finalizeGame() {
+    if (finalizing) return;
+
+    if (!player.fullName) {
+      alert(
+        "We couldn't load the player profile. Please return to Flight Path and try again."
+      );
+      return;
+    }
+
+    if (!player.membershipId) {
+      alert(
+        "We couldn't identify this player's current team membership. Please return to Flight Path and try again."
+      );
+      return;
+    }
+
+    if (!opponent.trim()) {
+      alert(
+        "Please enter the opponent before finalizing the game."
+      );
+      return;
+    }
+
+    const confirmed =
+      window.confirm(
+        `Finalize ${player.fullName}'s game vs. ${opponent.trim()}?\n\nThe stats will be added to this player's Flight Path.`
+      );
 
     if (!confirmed) return;
 
-    const p = playerName.trim();
-
-    if (!p) {
-      alert("Please enter Player Name.");
-      return;
-    }
+    setFinalizing(true);
 
     try {
       const {
@@ -661,32 +1078,142 @@ useEffect(() => {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        alert("Please sign in again.");
-        return;
+        throw new Error(
+          "You are no longer signed in."
+        );
       }
 
-      //
-      // Preserve the existing completed-game record.
-      // We will move completed games fully into Supabase next.
-      //
-      const entry: GameEntry = {
-        id: makeId(),
-        createdAt: Date.now(),
-        date: date || todayISO(),
-        team: team.trim() || "Fly Academy",
-        opponent: opponent.trim(),
-        playerName: p,
-        notes: notes.trim() || undefined,
-        counts: { ...counts },
-      };
+      /*
+       * -------------------------------------------------------
+       * 1. CREATE COMPLETED GAME
+       * -------------------------------------------------------
+       */
 
-      setGames((g) => [entry, ...g]);
-      setSelectedPlayer(p);
+      const {
+        data: gameRow,
+        error: gameError,
+      } = await supabase
+        .from("flight_games")
+        .insert({
+          player_id: playerId,
 
-      //
-      // The game is now complete, so remove the unfinished cloud draft.
-      //
-      const { error: draftDeleteError } = await supabase
+          team_membership_id:
+            player.membershipId,
+
+          created_by:
+            user.id,
+
+          game_date:
+            date || todayISO(),
+
+          opponent_name:
+            opponent.trim(),
+
+          game_note:
+            notes.trim() || null,
+
+          /*
+           * Team score can be added later.
+           */
+          fly_score: null,
+          opponent_score: null,
+          result: null,
+
+          completed_at:
+            new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+
+      if (gameError) {
+        throw gameError;
+      }
+
+      if (!gameRow?.id) {
+        throw new Error(
+          "Completed game was not created."
+        );
+      }
+
+      /*
+       * -------------------------------------------------------
+       * 2. CREATE GAME STATS
+       * -------------------------------------------------------
+       */
+
+      const {
+        error: statsError,
+      } = await supabase
+        .from("flight_game_stats")
+        .insert({
+          game_id:
+            gameRow.id,
+
+          two_pt_made:
+            counts.made2,
+
+          two_pt_missed:
+            counts.miss2,
+
+          three_pt_made:
+            counts.made3,
+
+          three_pt_missed:
+            counts.miss3,
+
+          ft_made:
+            counts.madeFT,
+
+          ft_missed:
+            counts.missFT,
+
+          rebounds:
+            counts.orb +
+            counts.drb,
+
+          assists:
+            counts.ast,
+
+          steals:
+            counts.stl,
+
+          turnovers:
+            counts.to,
+
+          blocks: 0,
+
+          fouls:
+            counts.pf,
+
+          playing_seconds: 0,
+        });
+
+      if (statsError) {
+        /*
+         * Best-effort cleanup so we don't leave
+         * an empty completed game.
+         */
+        try {
+          await supabase
+            .from("flight_games")
+            .delete()
+            .eq("id", gameRow.id);
+        } catch {
+          // Preserve original error below.
+        }
+
+        throw statsError;
+      }
+
+      /*
+       * -------------------------------------------------------
+       * 3. DELETE CLOUD DRAFT
+       * -------------------------------------------------------
+       */
+
+      const {
+        error: draftDeleteError,
+      } = await supabase
         .from("flight_game_drafts")
         .delete()
         .eq("player_id", playerId)
@@ -694,735 +1221,1431 @@ useEffect(() => {
 
       if (draftDeleteError) {
         console.error(
-          "Could not clear completed Flight Path draft:",
+          "Completed game saved, but draft cleanup failed:",
           draftDeleteError
         );
       }
 
-      //
-      // Remove the device copy of the unfinished game.
-      //
+      /*
+       * -------------------------------------------------------
+       * 4. DELETE LOCAL DRAFT
+       * -------------------------------------------------------
+       */
+
       if (typeof window !== "undefined") {
-        localStorage.removeItem(DRAFT_KEY);
+        localStorage.removeItem(
+          DRAFT_KEY
+        );
       }
 
-      //
-      // Clear the tracker only AFTER finalization.
-      //
-      resetLive();
+      /*
+       * -------------------------------------------------------
+       * 5. CLEAR LIVE TRACKER
+       * -------------------------------------------------------
+       */
 
-      //
-      // Tell FlightPathApp that the completed game is finished
-      // so it can return to Player Home.
-      //
+      setCounts({
+        ...emptyCounts,
+      });
+
+      setHistory([]);
+      setNotes("");
+      setOpponent("");
+
+      /*
+       * -------------------------------------------------------
+       * 6. RETURN TO PLAYER HOME
+       * -------------------------------------------------------
+       */
+
       if (onGameSaved) {
         onGameSaved();
       }
     } catch (error) {
-      console.error("Could not finalize game:", error);
+      console.error(
+        "Could not finalize Flight Path game:",
+        error
+      );
 
       alert(
-        "We couldn't finalize the game. Your live game has not been intentionally cleared. Please try again."
+        "We couldn't finalize the game. Your live stats are still saved, so nothing has been lost. Please try again."
       );
+    } finally {
+      setFinalizing(false);
     }
-  };
-  const deleteGame = (id: string) => {
-    setGames((g) => g.filter((x) => x.id !== id));
-  };
+  }
+
+  /* =========================================================
+     DISPLAY VALUES
+     ========================================================= */
+
+  const playerHeading = playerLoading
+    ? "LOADING PLAYER..."
+    : player.fullName || "PLAYER";
+
+  const jerseyDisplay =
+    player.jerseyNumber
+      ? ` · #${player.jerseyNumber}`
+      : "";
+
+  const teamSeasonLine = [
+    player.teamName,
+    player.seasonName,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const saveLabel =
+    saveState === "saving"
+      ? "SAVING..."
+      : saveState === "error"
+      ? "SAVED ON DEVICE"
+      : "AUTO-SAVED ✓";
+
+  /* =========================================================
+     RENDER
+     ========================================================= */
 
   return (
-    <div className="page">
-      <div className="topBar">
-        <div>
-          <div className="kicker">PREPARE FOR TAKEOFF</div>
-          <h1 className="title">Fly Stat Tracker</h1>
-          <div className="subtitle">Tap to track live. Save when the game ends. One player at a time.</div>
+    <main className="fpPage">
+      <div className="fpShell">
+        {/* =====================================================
+            TOP NAV
+            ===================================================== */}
+
+        <div className="fpTopNav">
+          <button
+            type="button"
+            className="fpBackButton"
+            onClick={exitGame}
+          >
+            ← FLIGHT PATH
+          </button>
+
+          <button
+            type="button"
+            className="fpVibrationButton"
+            onClick={() =>
+              setVibOn((current) => !current)
+            }
+          >
+            VIB: {vibOn ? "ON" : "OFF"}
+          </button>
         </div>
 
-        <div className="topActions">
-        <button
-  className="ghostBtn"
-  onClick={() => setVibOn((v) => !v)}
-  type="button"
->
-  Vib: {vibOn ? "On" : "Off"}
-</button>
+        {/* =====================================================
+            BRAND
+            ===================================================== */}
 
-          <button className="ghostBtn" onClick={confirmUndo} type="button" disabled={!history.length}>
-            Undo
-          </button>
-          <button className="ghostBtn" onClick={confirmReset} type="button">
-            Reset
-          </button>
-        </div>
-      </div>
+        <header className="fpHeader">
+          <div className="fpEyebrow">
+            THE FLY ACADEMY
+          </div>
 
-      <div className="grid">
-        {/* LEFT: Live game tracker */}
-        <div className="card">
-          <div className="cardHeader">
-  <div>
-    <div className="cardTitle">Live Game Tracker</div>
-    <div className="cardHint">
-      Stats auto-save as you track.
-    </div>
-  </div>
+          <div className="fpBrand">
+            FLIGHT PATH
+          </div>
 
-  <div
-    style={{
-      display: "flex",
-      gap: "8px",
-      alignItems: "center",
-      flexWrap: "wrap",
-      justifyContent: "flex-end",
-    }}
-  >
-    <div
-      style={{
-        fontSize: "11px",
-        color: "rgba(0,0,0,.50)",
-        fontWeight: 700,
-        whiteSpace: "nowrap",
-      }}
-    >
-      AUTO-SAVED ✓
-    </div>
+          <div className="fpTagline">
+            Track your game. See your journey.
+          </div>
+        </header>
 
-    <button
-      className="ghostBtn"
-      onClick={saveProgress}
-      type="button"
-    >
-      SAVE PROGRESS
-    </button>
+        {/* =====================================================
+            PLAYER / GAME IDENTITY
+            ===================================================== */}
 
-    <button
-      className="primaryBtn"
-      onClick={finalizeGame}
-      type="button"
-    >
-      FINALIZE GAME →
-    </button>
-  </div>
-</div>
-
-          <div className="formGrid">
-            <div className="field">
-              <div className="label">DATE</div>
-              <input className="input" value={date} onChange={(e) => setDate(e.target.value)} type="date" />
-            </div>
-
-            <div className="field">
-              <div className="label">TEAM</div>
-              <input className="input" value={team} onChange={(e) => setTeam(e.target.value)} placeholder="Fly Academy" />
-            </div>
-
-            <div className="field">
-              <div className="label">
-                PLAYER NAME <span className="req">*</span>
+        <section className="fpIdentityCard">
+          <div className="fpIdentityTop">
+            <div>
+              <div className="fpSectionEyebrow">
+                GAME IN PROGRESS
               </div>
+
+              <h1 className="fpPlayerName">
+                {playerHeading}
+                {jerseyDisplay}
+              </h1>
+
+              <div className="fpMembership">
+                {teamSeasonLine ||
+                  "Loading team information..."}
+              </div>
+            </div>
+
+            <div className="fpSaveStatus">
+              {saveLabel}
+            </div>
+          </div>
+
+          {playerError ? (
+            <div className="fpError">
+              {playerError}
+            </div>
+          ) : null}
+
+          <div className="fpGameMetaGrid">
+            <div className="fpMetaField">
+              <label className="fpMetaLabel">
+                OPPONENT
+              </label>
+
+              <div className="fpOpponentWrap">
+                <span className="fpVs">
+                  VS.
+                </span>
+
+                <input
+                  className="fpMetaInput"
+                  value={opponent}
+                  onChange={(event) =>
+                    setOpponent(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Opponent"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            <div className="fpMetaField">
+              <label className="fpMetaLabel">
+                GAME DATE
+              </label>
+
               <input
-                className="input"
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value)}
-                placeholder="e.g., Jordan"
+                className="fpMetaInput fpDateInput"
+                value={date}
+                onChange={(event) =>
+                  setDate(
+                    event.target.value
+                  )
+                }
+                type="date"
               />
             </div>
-
-            <div className="field">
-              <div className="label">OPPONENT</div>
-              <input
-                className="input"
-                value={opponent}
-                onChange={(e) => setOpponent(e.target.value)}
-                placeholder="e.g., Tigard"
-              />
-            </div>
           </div>
+        </section>
 
-          {/* STAT TILES — TWO HORIZONTAL ROWS (7 across) */}
-          <div className="statTilesWrap">
-            <div className="statTilesRow">
-              <StatChip label="PTS" value={scoring.pts} />
-              <StatChip label="FG" value={`${scoring.fgm}-${scoring.fga}`} />
-              <StatChip label="FG%" value={formatPct(scoring.fgPct)} />
-              <StatChip label="3P FG" value={`${scoring.tpm}-${scoring.tpa}`} />
-              <StatChip label="3P FG%" value={formatPct(scoring.tpPct)} />
-              <StatChip label="FT" value={`${scoring.ftm}-${scoring.fta}`} />
-              <StatChip label="FT%" value={formatPct(scoring.ftPct)} />
-            </div>
+        {/* =====================================================
+            LIVE SUMMARY
+            ===================================================== */}
 
-            <div className="statTilesRow statTilesRow2">
-              <StatChip label="O REBS" value={counts.orb} />
-              <StatChip label="D REBS" value={counts.drb} />
-              <StatChip label="TTL REBS" value={ttlRebs} />
-              <StatChip label="AST" value={counts.ast} />
-              <StatChip label="TO" value={counts.to} />
-              <StatChip label="STLS" value={counts.stl} />
-              <StatChip label="FOULS" value={counts.pf} />
-            </div>
-          </div>
+        <section className="fpSummaryCard">
+          <div className="fpPrimaryStats">
+            <StatTile
+              label="PTS"
+              value={scoring.points}
+            />
 
-          <div className="sectionLabel">SCORING</div>
-          <div className="btnGrid2">
-            <TapButton id="made2" activeId={lastTapId} tone="good" title="+2" sub="Made 2PT" onTap={() => inc("made2", "made2")} />
-            <TapButton id="miss2" activeId={lastTapId} tone="bad" title="2 Miss" sub="Missed 2PT" onTap={() => inc("miss2", "miss2")} />
-            <TapButton id="made3" activeId={lastTapId} tone="good" title="+3" sub="Made 3PT" onTap={() => inc("made3", "made3")} />
-            <TapButton id="miss3" activeId={lastTapId} tone="bad" title="3 Miss" sub="Missed 3PT" onTap={() => inc("miss3", "miss3")} />
-            <TapButton id="madeFT" activeId={lastTapId} tone="good" title="+FT" sub="Made FT" onTap={() => inc("madeFT", "madeFT")} />
-            <TapButton id="missFT" activeId={lastTapId} tone="bad" title="FT Miss" sub="Missed FT" onTap={() => inc("missFT", "missFT")} />
-          </div>
+            <StatTile
+              label="REB"
+              value={rebounds}
+            />
 
-          <div className="sectionLabel" style={{ marginTop: 14 }}>
-            HUSTLE + OTHER
-          </div>
-          <div className="btnGrid3">
-            <TapButton id="orb" activeId={lastTapId} tone="neutral" title="ORB" sub="Off. Rebound" onTap={() => inc("orb", "orb")} />
-            <TapButton id="drb" activeId={lastTapId} tone="neutral" title="DRB" sub="Def. Rebound" onTap={() => inc("drb", "drb")} />
-            <TapButton id="ast" activeId={lastTapId} tone="neutral" title="AST" sub="Assist" onTap={() => inc("ast", "ast")} />
-            <TapButton id="to" activeId={lastTapId} tone="neutral" title="TO" sub="Turnover" onTap={() => inc("to", "to")} />
-            <TapButton id="stl" activeId={lastTapId} tone="neutral" title="STL" sub="Steal" onTap={() => inc("stl", "stl")} />
-            <TapButton id="pf" activeId={lastTapId} tone="neutral" title="FOUL" sub="Personal" onTap={() => inc("pf", "pf")} />
-          </div>
+            <StatTile
+              label="AST"
+              value={counts.ast}
+            />
 
-          <div className="field" style={{ marginTop: 16 }}>
-            <div className="label">NOTES</div>
-            <textarea
-              className="textarea"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional notes…"
-              rows={3}
+            <StatTile
+              label="STL"
+              value={counts.stl}
             />
           </div>
 
-          <div className="microHint">
-            Tip: Big buttons flash on tap. Vibration can be toggled (top right).
-          </div>
-        </div>
+          <div className="fpShootingLine">
+            <span>
+              FG{" "}
+              <strong>
+                {scoring.fgm}-
+                {scoring.fga}
+              </strong>
+            </span>
 
-        {/* RIGHT: Player log */}
-        <div className="card">
-          <div className="cardHeader">
-            <div>
-              <div className="cardTitle">Player Log</div>
-              <div className="cardHint">{season.games} games</div>
-            </div>
+            <span className="fpDot">
+              ·
+            </span>
+
+            <span>
+              3PT{" "}
+              <strong>
+                {scoring.tpm}-
+                {scoring.tpa}
+              </strong>
+            </span>
+
+            <span className="fpDot">
+              ·
+            </span>
+
+            <span>
+              FT{" "}
+              <strong>
+                {scoring.ftm}-
+                {scoring.fta}
+              </strong>
+            </span>
           </div>
 
-          <div className="field" style={{ marginTop: 6 }}>
-            <div className="label">SELECT PLAYER</div>
-            <select className="select" value={selectedPlayer} onChange={(e) => setSelectedPlayer(e.target.value)}>
-              {playerNames.length === 0 ? (
-                <option value="">No players yet</option>
-              ) : (
-                playerNames.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))
+          <div className="fpSecondaryStats">
+            <StatTile
+              label="FG%"
+              value={formatPct(
+                scoring.fgPct
               )}
-            </select>
+            />
+
+            <StatTile
+              label="3PT%"
+              value={formatPct(
+                scoring.tpPct
+              )}
+            />
+
+            <StatTile
+              label="FT%"
+              value={formatPct(
+                scoring.ftPct
+              )}
+            />
+
+            <StatTile
+              label="TO"
+              value={counts.to}
+            />
+          </div>
+        </section>
+
+        {/* =====================================================
+            TRACKING CONTROLS
+            ===================================================== */}
+
+        <section className="fpTrackerCard">
+          <div className="fpTrackerHeader">
+            <div>
+              <div className="fpSectionEyebrow">
+                LIVE TRACKER
+              </div>
+
+              <h2 className="fpTrackerTitle">
+                Tap the game.
+              </h2>
+
+              <div className="fpTrackerSub">
+                Every tap is automatically
+                protected.
+              </div>
+            </div>
+
+            <div className="fpUndoReset">
+              <button
+                type="button"
+                className="fpUtilityButton"
+                onClick={confirmUndo}
+                disabled={
+                  history.length === 0
+                }
+              >
+                UNDO
+              </button>
+
+              <button
+                type="button"
+                className="fpUtilityButton"
+                onClick={confirmReset}
+              >
+                RESET
+              </button>
+            </div>
           </div>
 
-          <div className="sectionHeader">Season-to-date</div>
+          {/* ---------------------------------------------------
+              SCORING
+              --------------------------------------------------- */}
 
-          <div className="seasonGrid">
-            <div className="seasonChip">
-              <div className="seasonLabel">PPG</div>
-              <div className="seasonValue">{season.ppg.toFixed(1)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">RPG</div>
-              <div className="seasonValue">{season.rpg.toFixed(1)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">APG</div>
-              <div className="seasonValue">{season.apg.toFixed(1)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">FG%</div>
-              <div className="seasonValue">{formatPct(season.fgPct)}</div>
-            </div>
-
-            <div className="seasonChip">
-              <div className="seasonLabel">3P%</div>
-              <div className="seasonValue">{formatPct(season.tpPct)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">FT%</div>
-              <div className="seasonValue">{formatPct(season.ftPct)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">ORB/G</div>
-              <div className="seasonValue">{season.orbg.toFixed(1)}</div>
-            </div>
-            <div className="seasonChip">
-              <div className="seasonLabel">DRB/G</div>
-              <div className="seasonValue">{season.drbg.toFixed(1)}</div>
-            </div>
+          <div className="fpGroupLabel">
+            SCORING
           </div>
 
-          <div className="microHint" style={{ marginTop: 10 }}>
-            Tip: Save each game. This panel updates averages automatically.
+          <div className="fpScoringGrid">
+            <TapButton
+              id="made2"
+              activeId={lastTapId}
+              title="+2"
+              subtitle="MADE 2PT"
+              variant="make"
+              onTap={() =>
+                inc("made2", "made2")
+              }
+            />
+
+            <TapButton
+              id="miss2"
+              activeId={lastTapId}
+              title="2 MISS"
+              subtitle="MISSED 2PT"
+              variant="miss"
+              onTap={() =>
+                inc("miss2", "miss2")
+              }
+            />
+
+            <TapButton
+              id="made3"
+              activeId={lastTapId}
+              title="+3"
+              subtitle="MADE 3PT"
+              variant="make"
+              onTap={() =>
+                inc("made3", "made3")
+              }
+            />
+
+            <TapButton
+              id="miss3"
+              activeId={lastTapId}
+              title="3 MISS"
+              subtitle="MISSED 3PT"
+              variant="miss"
+              onTap={() =>
+                inc("miss3", "miss3")
+              }
+            />
+
+            <TapButton
+              id="madeFT"
+              activeId={lastTapId}
+              title="+FT"
+              subtitle="MADE FREE THROW"
+              variant="make"
+              onTap={() =>
+                inc(
+                  "madeFT",
+                  "madeFT"
+                )
+              }
+            />
+
+            <TapButton
+              id="missFT"
+              activeId={lastTapId}
+              title="FT MISS"
+              subtitle="MISSED FREE THROW"
+              variant="miss"
+              onTap={() =>
+                inc(
+                  "missFT",
+                  "missFT"
+                )
+              }
+            />
           </div>
 
-          <div className="sectionHeader" style={{ marginTop: 16 }}>
-            Games
+          {/* ---------------------------------------------------
+              OTHER
+              --------------------------------------------------- */}
+
+          <div className="fpGroupLabel fpOtherLabel">
+            HUSTLE + OTHER
           </div>
 
-          {gamesForSelected.length === 0 ? (
-            <div className="emptyBox">No games saved for this player yet.</div>
-          ) : (
-            <div className="gamesList">
-              {gamesForSelected.map((g) => {
-                const fgm = g.counts.made2 + g.counts.made3;
-                const fga = g.counts.made2 + g.counts.miss2 + g.counts.made3 + g.counts.miss3;
-                const tpm = g.counts.made3;
-                const tpa = g.counts.made3 + g.counts.miss3;
-                const ftm = g.counts.madeFT;
-                const fta = g.counts.madeFT + g.counts.missFT;
-                const pts = g.counts.made2 * 2 + g.counts.made3 * 3 + g.counts.madeFT;
+          <div className="fpOtherGrid">
+            <TapButton
+              id="orb"
+              activeId={lastTapId}
+              title="OREB"
+              subtitle="OFFENSIVE REBOUND"
+              variant="neutral"
+              onTap={() =>
+                inc("orb", "orb")
+              }
+            />
 
-                return (
-                  <div key={g.id} className="gameCard">
-                    <div className="gameTop">
-                      <div className="gameTitle">
-                        {g.playerName} • {g.date}
-                      </div>
-                      <button className="miniBtn" onClick={() => deleteGame(g.id)} type="button">
-                        Delete
-                      </button>
-                    </div>
-                    <div className="gameMeta">
-                      {g.opponent ? `vs ${g.opponent} • ` : ""}
-                      PTS {pts} • FG {fgm}-{fga} • 3P {tpm}-{tpa} • FT {ftm}-{fta}
-                    </div>
+            <TapButton
+              id="drb"
+              activeId={lastTapId}
+              title="DREB"
+              subtitle="DEFENSIVE REBOUND"
+              variant="neutral"
+              onTap={() =>
+                inc("drb", "drb")
+              }
+            />
 
-                    <div className="miniGrid">
-                      <div className="miniChip">
-                        <div className="miniLabel">REB</div>
-                        <div className="miniValue">{g.counts.orb + g.counts.drb}</div>
-                      </div>
-                      <div className="miniChip">
-                        <div className="miniLabel">AST</div>
-                        <div className="miniValue">{g.counts.ast}</div>
-                      </div>
-                      <div className="miniChip">
-                        <div className="miniLabel">STL</div>
-                        <div className="miniValue">{g.counts.stl}</div>
-                      </div>
-                      <div className="miniChip">
-                        <div className="miniLabel">FOUL</div>
-                        <div className="miniValue">{g.counts.pf}</div>
-                      </div>
-                    </div>
+            <TapButton
+              id="ast"
+              activeId={lastTapId}
+              title="AST"
+              subtitle="ASSIST"
+              variant="neutral"
+              onTap={() =>
+                inc("ast", "ast")
+              }
+            />
 
-                    {g.notes ? <div className="gameNotes">{g.notes}</div> : null}
-                  </div>
-                );
-              })}
+            <TapButton
+              id="stl"
+              activeId={lastTapId}
+              title="STL"
+              subtitle="STEAL"
+              variant="neutral"
+              onTap={() =>
+                inc("stl", "stl")
+              }
+            />
+
+            <TapButton
+              id="to"
+              activeId={lastTapId}
+              title="TO"
+              subtitle="TURNOVER"
+              variant="neutral"
+              onTap={() =>
+                inc("to", "to")
+              }
+            />
+
+            <TapButton
+              id="pf"
+              activeId={lastTapId}
+              title="FOUL"
+              subtitle="PERSONAL FOUL"
+              variant="neutral"
+              onTap={() =>
+                inc("pf", "pf")
+              }
+            />
+          </div>
+
+          {/* ---------------------------------------------------
+              NOTES
+              --------------------------------------------------- */}
+
+          <div className="fpNotesWrap">
+            <label className="fpGroupLabel">
+              GAME NOTES
+            </label>
+
+            <textarea
+              className="fpNotes"
+              value={notes}
+              onChange={(event) =>
+                setNotes(
+                  event.target.value
+                )
+              }
+              rows={3}
+              placeholder="Optional..."
+            />
+          </div>
+        </section>
+
+        {/* =====================================================
+            SAVE / FINALIZE
+            ===================================================== */}
+
+        <section className="fpFinishCard">
+          <div className="fpFinishCopy">
+            <div className="fpSectionEyebrow">
+              YOUR GAME IS PROTECTED
             </div>
-          )}
 
-          <div className="microHint" style={{ marginTop: 12 }}>
-            Saved games are stored locally on this device for now. Next upgrade: export/share + cloud sync across devices.
+            <div className="fpFinishTitle">
+              {saveState === "saving"
+                ? "Saving your latest stats..."
+                : saveState === "error"
+                ? "Saved safely on this device."
+                : "Auto-saved as you track."}
+            </div>
+
+            <div className="fpFinishText">
+              Use Save Progress anytime you
+              want an extra checkpoint. Finalize
+              only when the game is over.
+            </div>
+
+            {manualSaveMessage ? (
+              <div className="fpSaveMessage">
+                {manualSaveMessage}
+              </div>
+            ) : null}
           </div>
-        </div>
+
+          <div className="fpFinishActions">
+            <button
+              type="button"
+              className="fpSaveProgressButton"
+              onClick={saveProgress}
+            >
+              SAVE PROGRESS
+            </button>
+
+            <button
+              type="button"
+              className="fpFinalizeButton"
+              onClick={finalizeGame}
+              disabled={
+                finalizing ||
+                playerLoading
+              }
+            >
+              {finalizing
+                ? "FINALIZING..."
+                : "FINALIZE GAME →"}
+            </button>
+          </div>
+        </section>
       </div>
 
+      {/* =======================================================
+          STYLES
+          ======================================================= */}
+
       <style>{`
-        :root{
-          --bg:#f6f6f4;
-          --card:#ffffff;
-          --ink:#0b0b0b;
-          --muted:rgba(0,0,0,.55);
-          --line:rgba(0,0,0,.12);
-          --shadow:0 10px 25px rgba(0,0,0,.06);
-          --radius:18px;
+        :root {
+          --fp-bg: #050505;
+          --fp-card: #0d0d0d;
+          --fp-card-2: #101010;
+          --fp-line: #292929;
+          --fp-line-soft: #202020;
 
-          /* Fly-ish tones */
-          --good:#0b6b66;     /* deep teal */
-          --bad:#d0482e;      /* fly red/orange */
-          --neutral:#7ea6bf;  /* cool blue */
+          --fp-white: #f7f7f7;
+          --fp-text: #eeeeee;
+          --fp-muted: #929292;
+          --fp-muted-2: #686868;
+
+          --fp-make: #6f9db9;
+          --fp-make-active: #82b1cc;
+
+          --fp-miss: #d8492f;
+          --fp-miss-active: #ea563b;
+
+          --fp-neutral: #181818;
+          --fp-neutral-active: #252525;
         }
 
-        .page{
-          padding: 28px 18px 40px;
-          background: var(--bg);
-          min-height: 100vh;
-          color: var(--ink);
-          font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+        * {
+          box-sizing: border-box;
         }
 
-        .topBar{
-          max-width: 1120px;
-          margin: 0 auto 18px;
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:16px;
-        }
-
-        .kicker{
-          letter-spacing: .18em;
-          font-size: 11px;
-          color: var(--muted);
-          text-transform: uppercase;
-          margin-bottom: 6px;
-        }
-
-        .title{
+        html,
+        body {
           margin: 0;
-          font-size: 34px;
-          line-height: 1.08;
+          background: var(--fp-bg);
         }
 
-        .subtitle{
-          margin-top: 8px;
-          color: var(--muted);
-          font-size: 14px;
+        button,
+        input,
+        textarea {
+          font: inherit;
         }
 
-        .topActions{
-          display:flex;
-          gap:10px;
-          flex-wrap: wrap;
-          justify-content:flex-end;
-        }
-
-        .ghostBtn{
-          border: 1px solid var(--line);
-          background: #fff;
-          border-radius: 999px;
-          padding: 10px 14px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-        .ghostBtn:disabled{
-          opacity:.45;
-          cursor:not-allowed;
-        }
-
-        .grid{
-          max-width: 1120px;
-          margin: 0 auto;
-          display:grid;
-          grid-template-columns: 1.1fr .9fr;
-          gap: 18px;
-          align-items:start;
-        }
-
-        @media (max-width: 980px){
-          .grid{ grid-template-columns: 1fr; }
-        }
-
-        .card{
-          background: var(--card);
-          border: 1px solid var(--line);
-          border-radius: var(--radius);
-          box-shadow: var(--shadow);
-          padding: 18px;
-        }
-
-        .cardHeader{
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:12px;
-          margin-bottom: 10px;
-        }
-
-        .cardTitle{
-          font-weight: 800;
-          font-size: 16px;
-        }
-
-        .cardHint{
-          color: var(--muted);
-          font-size: 12px;
-          margin-top: 2px;
-        }
-
-        .primaryBtn{
-          background: var(--ink);
-          color: #fff;
-          border: 0;
-          border-radius: 999px;
-          padding: 10px 14px;
-          font-weight: 700;
-          cursor: pointer;
-        }
-
-        .formGrid{
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-top: 10px;
-        }
-
-        @media (max-width: 520px){
-          .formGrid{ grid-template-columns: 1fr; }
-        }
-
-        .field .label{
-          font-size: 11px;
-          letter-spacing: .14em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
-          margin-bottom: 6px;
-        }
-
-        .req{ color: var(--bad); font-weight: 800; }
-
-        .input, .select, .textarea{
-          width:100%;
-          border: 1px solid var(--line);
-          border-radius: 12px;
-          padding: 12px 12px;
-          font-size: 14px;
-          outline: none;
-          background: #fff;
-        }
-
-        .textarea{ resize: vertical; }
-
-        /* --- STAT TILES (two horizontal rows, 7 across) --- */
-        .statTilesWrap { margin-top: 14px; }
-
-        .statTilesRow {
-          display: grid !important;
-          grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
-          gap: 10px;
-          align-items: stretch;
-        }
-
-        .statTilesRow2 { margin-top: 10px; }
-
-        .statTilesRow > * {
-          width: auto !important;
-          min-width: 0 !important;
-        }
-
-        @media (max-width: 900px) {
-          .statTilesRow { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
-        }
-
-        @media (max-width: 520px) {
-          .statTilesRow { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-        }
-
-        .chip{
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          padding: 10px 10px;
-          background: #fff;
-          min-height: 54px;
-          display:flex;
-          flex-direction:column;
-          justify-content:center;
-        }
-
-        .chipLabel{
-          font-size: 10px;
-          letter-spacing: .12em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
-          white-space: nowrap;
-        }
-
-        .chipValue{
-          margin-top: 2px;
-          font-size: 18px;
-          font-weight: 800;
-          white-space: nowrap;
-        }
-
-        .sectionLabel{
-          margin-top: 14px;
-          font-size: 11px;
-          letter-spacing: .14em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
-        }
-
-        .btnGrid2{
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-top: 10px;
-        }
-
-        .btnGrid3{
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-top: 10px;
-        }
-
-        /* =========================================================
-           STEP 1: MOBILE TAP OPTIMIZATIONS (no layout changes)
-           - Prevent iOS double-tap zoom + reduce accidental selection
-           - Remove tap highlight on mobile
-           ========================================================= */
-        .tapBtn, .ghostBtn, .primaryBtn, .miniBtn{
+        button {
+          -webkit-tap-highlight-color: transparent;
           touch-action: manipulation;
         }
 
-        .tapBtn{
-          user-select: none;
-          -webkit-user-select: none;
-          -webkit-tap-highlight-color: transparent;
+        .fpPage {
+          min-height: 100vh;
+          background: var(--fp-bg);
+          color: var(--fp-text);
+          font-family:
+            Arial,
+            Helvetica,
+            sans-serif;
+
+          padding:
+            max(18px, env(safe-area-inset-top))
+            18px
+            max(36px, env(safe-area-inset-bottom));
         }
 
-        .tapBtn{
-          border: 0;
-          border-radius: 18px;
-          padding: 16px 16px;
+        .fpShell {
+          width: 100%;
+          max-width: 760px;
+          margin: 0 auto;
+        }
+
+        /* =====================================================
+           NAV
+           ===================================================== */
+
+        .fpTopNav {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+
+          margin-bottom: 28px;
+        }
+
+        .fpBackButton,
+        .fpVibrationButton {
+          appearance: none;
+
+          background: transparent;
+          color: #8c8c8c;
+
+          border: 1px solid #242424;
+          border-radius: 999px;
+
+          padding: 10px 13px;
+
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.12em;
+
           cursor: pointer;
-          color: #fff;
-          text-align:left;
-          min-height: 84px;
-
-          transition: transform 80ms ease, filter 120ms ease;
-          box-shadow: 0 10px 20px rgba(0,0,0,.10);
         }
 
-        .tapBtnTitle{
-          font-size: 22px;
+        .fpBackButton:hover,
+        .fpVibrationButton:hover {
+          color: white;
+          border-color: #444;
+        }
+
+        /* =====================================================
+           HEADER
+           ===================================================== */
+
+        .fpHeader {
+          text-align: center;
+          margin-bottom: 34px;
+        }
+
+        .fpEyebrow {
+          color: #777;
+
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.3em;
+
+          margin-bottom: 10px;
+        }
+
+        .fpBrand {
+          color: white;
+
+          font-size: clamp(28px, 5vw, 40px);
           font-weight: 900;
-          letter-spacing: .02em;
+          letter-spacing: -0.03em;
         }
 
-        .tapBtnSub{
-          margin-top: 6px;
+        .fpTagline {
+          color: #888;
+
+          margin-top: 9px;
+
           font-size: 13px;
-          opacity: .92;
         }
 
-        .tapBtnGood{ background: var(--good); }
-        .tapBtnBad{ background: var(--bad); }
-        .tapBtnNeutral{ background: var(--neutral); }
+        /* =====================================================
+           COMMON CARDS
+           ===================================================== */
 
-        .tapBtnActive{
-          filter: brightness(1.15);
-          transform: scale(0.98);
+        .fpIdentityCard,
+        .fpSummaryCard,
+        .fpTrackerCard,
+        .fpFinishCard {
+          background: var(--fp-card);
+
+          border: 1px solid var(--fp-line);
+
+          border-radius: 24px;
         }
 
-        .microHint{
-          margin-top: 12px;
-          font-size: 12px;
-          color: rgba(0,0,0,.55);
+        .fpIdentityCard {
+          padding: 24px;
+          margin-bottom: 14px;
         }
 
-        .sectionHeader{
-          margin-top: 14px;
+        .fpSummaryCard {
+          padding: 16px;
+          margin-bottom: 14px;
+        }
+
+        .fpTrackerCard {
+          padding: 24px;
+          margin-bottom: 14px;
+        }
+
+        .fpFinishCard {
+          padding: 24px;
+        }
+
+        /* =====================================================
+           IDENTITY
+           ===================================================== */
+
+        .fpIdentityTop {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+        }
+
+        .fpSectionEyebrow {
+          color: #777;
+
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.22em;
+
+          text-transform: uppercase;
+        }
+
+        .fpPlayerName {
+          color: white;
+
+          margin:
+            9px 0
+            7px;
+
+          font-size:
+            clamp(
+              25px,
+              6vw,
+              36px
+            );
+
+          line-height: 1;
+
           font-weight: 900;
+          letter-spacing: -0.035em;
+
+          text-transform: uppercase;
+        }
+
+        .fpMembership {
+          color: #969696;
+
+          font-size: 13px;
+          line-height: 1.5;
+        }
+
+        .fpSaveStatus {
+          color: #777;
+
+          font-size: 9px;
+          letter-spacing: 0.12em;
+          font-weight: 800;
+
+          white-space: nowrap;
+        }
+
+        .fpError {
+          margin-top: 14px;
+
+          color: #ff7a65;
+
+          font-size: 12px;
+        }
+
+        .fpGameMetaGrid {
+          margin-top: 24px;
+
+          padding-top: 20px;
+
+          border-top:
+            1px solid
+            var(--fp-line-soft);
+
+          display: grid;
+          grid-template-columns:
+            1.4fr 0.8fr;
+
+          gap: 12px;
+        }
+
+        .fpMetaField {
+          min-width: 0;
+        }
+
+        .fpMetaLabel {
+          display: block;
+
+          margin-bottom: 7px;
+
+          color: #696969;
+
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.18em;
+        }
+
+        .fpOpponentWrap {
+          display: flex;
+          align-items: center;
+
+          background: #141414;
+          border: 1px solid #292929;
+          border-radius: 14px;
+
+          overflow: hidden;
+        }
+
+        .fpVs {
+          color: #727272;
+
+          padding-left: 12px;
+
+          font-size: 11px;
+          font-weight: 900;
+        }
+
+        .fpMetaInput {
+          width: 100%;
+          min-width: 0;
+
+          background: #141414;
+          color: white;
+
+          border: 1px solid #292929;
+          border-radius: 14px;
+
+          padding: 13px;
+
+          outline: none;
+
           font-size: 14px;
         }
 
-        .seasonGrid{
-          margin-top: 10px;
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
+        .fpOpponentWrap .fpMetaInput {
+          border: none;
+          border-radius: 0;
+
+          padding-left: 8px;
         }
 
-        .seasonChip{
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          padding: 12px;
-          background: #fff;
+        .fpMetaInput:focus,
+        .fpOpponentWrap:focus-within {
+          border-color: #555;
         }
 
-        .seasonLabel{
-          font-size: 10px;
-          letter-spacing: .12em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
+        .fpMetaInput::placeholder {
+          color: #5d5d5d;
         }
 
-        .seasonValue{
-          margin-top: 4px;
-          font-size: 20px;
-          font-weight: 900;
+        .fpDateInput {
+          color-scheme: dark;
         }
 
-        .emptyBox{
-          margin-top: 10px;
-          border: 1px dashed var(--line);
-          border-radius: 14px;
-          padding: 14px;
-          color: rgba(0,0,0,.55);
-          background: rgba(255,255,255,.65);
-        }
+        /* =====================================================
+           SUMMARY
+           ===================================================== */
 
-        .gamesList{ margin-top: 10px; display:flex; flex-direction:column; gap: 10px; }
+        .fpPrimaryStats {
+          display: grid;
+          grid-template-columns:
+            repeat(4, 1fr);
 
-        .gameCard{
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          padding: 12px;
-          background: #fff;
-        }
-
-        .gameTop{
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap: 10px;
-        }
-
-        .gameTitle{ font-weight: 900; }
-
-        .miniBtn{
-          border: 1px solid var(--line);
-          background: #fff;
-          border-radius: 999px;
-          padding: 8px 12px;
-          font-weight: 800;
-          cursor: pointer;
-        }
-
-        .gameMeta{
-          margin-top: 4px;
-          color: rgba(0,0,0,.6);
-          font-size: 12px;
-        }
-
-        .miniGrid{
-          margin-top: 10px;
-          display:grid;
-          grid-template-columns: repeat(4, 1fr);
           gap: 8px;
         }
 
-        .miniChip{
-          border: 1px solid var(--line);
-          border-radius: 12px;
-          padding: 10px;
-          background: #fff;
-        }
-        .miniLabel{
-          font-size: 10px;
-          letter-spacing: .12em;
-          text-transform: uppercase;
-          color: rgba(0,0,0,.55);
-        }
-        .miniValue{
-          margin-top: 2px;
-          font-weight: 900;
-          font-size: 16px;
+        .fpSecondaryStats {
+          display: grid;
+          grid-template-columns:
+            repeat(4, 1fr);
+
+          gap: 8px;
+
+          margin-top: 8px;
         }
 
-        .gameNotes{
-          margin-top: 10px;
+        .fpStatTile {
+          min-width: 0;
+
+          background: var(--fp-card-2);
+
+          border: 1px solid
+            var(--fp-line-soft);
+
+          border-radius: 16px;
+
+          padding: 13px;
+        }
+
+        .fpStatLabel {
+          color: #6d6d6d;
+
+          font-size: 8px;
+          font-weight: 800;
+          letter-spacing: 0.16em;
+
+          white-space: nowrap;
+        }
+
+        .fpStatValue {
+          color: white;
+
+          margin-top: 5px;
+
+          font-size:
+            clamp(
+              20px,
+              4vw,
+              27px
+            );
+
+          font-weight: 900;
+
+          white-space: nowrap;
+        }
+
+        .fpStatDetail {
+          color: #6c6c6c;
+
+          margin-top: 3px;
+
+          font-size: 9px;
+        }
+
+        .fpShootingLine {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 7px;
+
+          color: #8c8c8c;
+
+          padding:
+            13px 3px
+            5px;
+
+          font-size: 11px;
+        }
+
+        .fpShootingLine strong {
+          color: #c8c8c8;
+        }
+
+        .fpDot {
+          color: #484848;
+        }
+
+        /* =====================================================
+           TRACKER
+           ===================================================== */
+
+        .fpTrackerHeader {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+
+          gap: 14px;
+
+          margin-bottom: 24px;
+        }
+
+        .fpTrackerTitle {
+          color: white;
+
+          margin:
+            8px 0
+            5px;
+
+          font-size: 24px;
+
+          font-weight: 900;
+          letter-spacing: -0.03em;
+        }
+
+        .fpTrackerSub {
+          color: #777;
           font-size: 12px;
-          color: rgba(0,0,0,.65);
-          border-top: 1px solid var(--line);
-          padding-top: 10px;
+        }
+
+        .fpUndoReset {
+          display: flex;
+          gap: 6px;
+        }
+
+        .fpUtilityButton {
+          appearance: none;
+
+          background: #151515;
+          color: #8d8d8d;
+
+          border: 1px solid
+            #282828;
+
+          border-radius: 999px;
+
+          padding: 9px 11px;
+
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+
+          cursor: pointer;
+        }
+
+        .fpUtilityButton:disabled {
+          opacity: 0.32;
+          cursor: default;
+        }
+
+        .fpGroupLabel {
+          display: block;
+
+          color: #727272;
+
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.18em;
+
+          text-transform: uppercase;
+        }
+
+        .fpOtherLabel {
+          margin-top: 26px;
+        }
+
+        .fpScoringGrid {
+          margin-top: 10px;
+
+          display: grid;
+          grid-template-columns:
+            1fr 1fr;
+
+          gap: 10px;
+        }
+
+        .fpOtherGrid {
+          margin-top: 10px;
+
+          display: grid;
+          grid-template-columns:
+            repeat(3, 1fr);
+
+          gap: 10px;
+        }
+
+        /* =====================================================
+           TAP BUTTONS
+           ===================================================== */
+
+        .fpTapButton {
+          appearance: none;
+
+          width: 100%;
+
+          border: none;
+          border-radius: 18px;
+
+          min-height: 92px;
+
+          padding: 17px;
+
+          text-align: left;
+
+          cursor: pointer;
+
+          user-select: none;
+          -webkit-user-select: none;
+
+          transition:
+            transform 80ms ease,
+            filter 100ms ease,
+            background 100ms ease;
+        }
+
+        .fpTapMake {
+          background: var(--fp-make);
+          color: white;
+        }
+
+        .fpTapMiss {
+          background: var(--fp-miss);
+          color: white;
+        }
+
+        .fpTapNeutral {
+          background:
+            var(--fp-neutral);
+
+          color: white;
+
+          border:
+            1px solid
+            #303030;
+        }
+
+        .fpTapActive {
+          transform: scale(0.975);
+          filter: brightness(1.15);
+        }
+
+        .fpTapTitle {
+          font-size:
+            clamp(
+              20px,
+              4vw,
+              26px
+            );
+
+          font-weight: 900;
+          letter-spacing: -0.02em;
+        }
+
+        .fpTapSubtitle {
+          margin-top: 8px;
+
+          font-size: 9px;
+          font-weight: 800;
+
+          letter-spacing: 0.08em;
+
+          opacity: 0.72;
+        }
+
+        /* =====================================================
+           NOTES
+           ===================================================== */
+
+        .fpNotesWrap {
+          margin-top: 26px;
+        }
+
+        .fpNotes {
+          width: 100%;
+
+          margin-top: 9px;
+
+          resize: vertical;
+
+          background: #141414;
+          color: white;
+
+          border: 1px solid #292929;
+          border-radius: 16px;
+
+          padding: 14px;
+
+          outline: none;
+
+          font-size: 13px;
+          line-height: 1.5;
+        }
+
+        .fpNotes:focus {
+          border-color: #4c4c4c;
+        }
+
+        .fpNotes::placeholder {
+          color: #555;
+        }
+
+        /* =====================================================
+           FINISH
+           ===================================================== */
+
+        .fpFinishCard {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+
+          gap: 22px;
+        }
+
+        .fpFinishCopy {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .fpFinishTitle {
+          color: white;
+
+          margin-top: 8px;
+
+          font-size: 17px;
+          font-weight: 800;
+        }
+
+        .fpFinishText {
+          max-width: 400px;
+
+          margin-top: 5px;
+
+          color: #777;
+
+          font-size: 11px;
+          line-height: 1.5;
+        }
+
+        .fpSaveMessage {
+          display: inline-block;
+
+          margin-top: 11px;
+
+          padding: 7px 10px;
+
+          background: #161616;
+
+          border: 1px solid #303030;
+          border-radius: 999px;
+
+          color: #a4a4a4;
+
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .fpFinishActions {
+          display: flex;
+          gap: 8px;
+
+          flex-shrink: 0;
+        }
+
+        .fpSaveProgressButton,
+        .fpFinalizeButton {
+          appearance: none;
+
+          border-radius: 14px;
+
+          padding: 14px 16px;
+
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.02em;
+
+          cursor: pointer;
+        }
+
+        .fpSaveProgressButton {
+          background: #161616;
+          color: white;
+
+          border: 1px solid #343434;
+        }
+
+        .fpFinalizeButton {
+          background: white;
+          color: black;
+
+          border: 1px solid white;
+        }
+
+        .fpFinalizeButton:disabled {
+          opacity: 0.45;
+          cursor: default;
+        }
+
+        /* =====================================================
+           TABLET / PHONE
+           ===================================================== */
+
+        @media (max-width: 640px) {
+          .fpPage {
+            padding-left: 12px;
+            padding-right: 12px;
+          }
+
+          .fpTopNav {
+            margin-bottom: 22px;
+          }
+
+          .fpHeader {
+            margin-bottom: 26px;
+          }
+
+          .fpIdentityCard,
+          .fpTrackerCard,
+          .fpFinishCard {
+            border-radius: 20px;
+            padding: 18px;
+          }
+
+          .fpSummaryCard {
+            border-radius: 20px;
+            padding: 10px;
+          }
+
+          .fpIdentityTop {
+            display: block;
+          }
+
+          .fpSaveStatus {
+            margin-top: 13px;
+          }
+
+          .fpGameMetaGrid {
+            grid-template-columns: 1fr;
+          }
+
+          .fpPrimaryStats,
+          .fpSecondaryStats {
+            grid-template-columns:
+              repeat(4, 1fr);
+
+            gap: 5px;
+          }
+
+          .fpStatTile {
+            padding: 10px 8px;
+            border-radius: 13px;
+          }
+
+          .fpStatValue {
+            font-size: 21px;
+          }
+
+          .fpOtherGrid {
+            grid-template-columns:
+              repeat(2, 1fr);
+          }
+
+          .fpTrackerHeader {
+            display: block;
+          }
+
+          .fpUndoReset {
+            margin-top: 14px;
+          }
+
+          .fpFinishCard {
+            display: block;
+          }
+
+          .fpFinishActions {
+            display: grid;
+            grid-template-columns: 1fr;
+
+            margin-top: 18px;
+          }
+
+          .fpSaveProgressButton,
+          .fpFinalizeButton {
+            width: 100%;
+
+            padding: 16px;
+          }
+        }
+
+        @media (max-width: 390px) {
+          .fpPrimaryStats,
+          .fpSecondaryStats {
+            grid-template-columns:
+              repeat(2, 1fr);
+          }
+
+          .fpScoringGrid {
+            gap: 8px;
+          }
+
+          .fpTapButton {
+            min-height: 86px;
+            padding: 14px;
+          }
+
+          .fpBackButton,
+          .fpVibrationButton {
+            font-size: 8px;
+          }
         }
       `}</style>
-    </div>
+    </main>
   );
 }
