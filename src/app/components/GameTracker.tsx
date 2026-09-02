@@ -43,6 +43,7 @@ type GameDraft = {
   counts: LiveCounts;
   playingSeconds: number;
   isInGame: boolean;
+  isClockPaused?: boolean;
   liveSegmentStartedAt: number | null;
   flyScore: string;
   opponentScore: string;
@@ -135,6 +136,7 @@ export default function GameTracker({
 
   const [playingSeconds, setPlayingSeconds] = useState(0);
   const [isInGame, setIsInGame] = useState(false);
+  const [isClockPaused, setIsClockPaused] = useState(false);
   const [liveSegmentStartedAt, setLiveSegmentStartedAt] =
     useState<number | null>(null);
 
@@ -306,6 +308,7 @@ export default function GameTracker({
 
           setPlayingSeconds(localDraft.playingSeconds ?? 0);
           setIsInGame(localDraft.isInGame ?? false);
+          setIsClockPaused(localDraft.isClockPaused ?? false);
 
           setLiveSegmentStartedAt(localDraft.liveSegmentStartedAt ?? null);
 
@@ -341,6 +344,7 @@ export default function GameTracker({
 
           // Cloud recovery resumes safely in OUT state.
           setIsInGame(false);
+          setIsClockPaused(false);
           setLiveSegmentStartedAt(null);
         }
       } catch (error) {
@@ -453,6 +457,7 @@ export default function GameTracker({
       playingSeconds: getCurrentPlayingSeconds(),
 
       isInGame,
+      isClockPaused,
       liveSegmentStartedAt,
 
       flyScore,
@@ -565,6 +570,7 @@ export default function GameTracker({
     counts,
     playingSeconds,
     isInGame,
+    isClockPaused,
     liveSegmentStartedAt,
     flyScore,
     opponentScore,
@@ -649,25 +655,52 @@ export default function GameTracker({
   ========================================================= */
 
   function subIn() {
-    if (isInGame) return;
+    if (isInGame && !isClockPaused) return;
 
     setLiveSegmentStartedAt(Date.now());
     setIsInGame(true);
+    setIsClockPaused(false);
 
     tapFeedback("in-game", "strong");
   }
 
-  function subOut() {
-    if (!isInGame || !liveSegmentStartedAt) return;
+  function pauseClock() {
+    if (!isInGame || isClockPaused || !liveSegmentStartedAt) return;
 
     const segmentSeconds = Math.floor(
       (Date.now() - liveSegmentStartedAt) / 1000
     );
 
     setPlayingSeconds((current) => current + segmentSeconds);
+    setLiveSegmentStartedAt(null);
+    setIsClockPaused(true);
+
+    tapFeedback("pause-clock", "strong");
+  }
+
+  function resumeClock() {
+    if (!isInGame || !isClockPaused) return;
+
+    setLiveSegmentStartedAt(Date.now());
+    setIsClockPaused(false);
+
+    tapFeedback("resume-clock", "strong");
+  }
+
+  function subOut() {
+    if (!isInGame) return;
+
+    if (!isClockPaused && liveSegmentStartedAt) {
+      const segmentSeconds = Math.floor(
+        (Date.now() - liveSegmentStartedAt) / 1000
+      );
+
+      setPlayingSeconds((current) => current + segmentSeconds);
+    }
 
     setLiveSegmentStartedAt(null);
     setIsInGame(false);
+    setIsClockPaused(false);
 
     tapFeedback("subbed-out", "strong");
   }
@@ -729,6 +762,7 @@ export default function GameTracker({
     setDisplayedPlayingSeconds(0);
 
     setIsInGame(false);
+    setIsClockPaused(false);
     setLiveSegmentStartedAt(null);
 
     setDate(todayISO());
@@ -900,29 +934,29 @@ export default function GameTracker({
       }
 
       /* -----------------------------------------------
-   CONSUME CREDIT
------------------------------------------------ */
+         CONSUME CREDIT
+      ----------------------------------------------- */
 
-const { error: creditError } = await supabase.rpc(
-  "consume_flight_game_credit",
-  {
-    p_user_id: user.id,
-  }
-);
+      const { error: creditError } = await supabase
+        .from("flight_entitlements")
+        .update({
+          games_used: gamesUsed + 1,
+        })
+        .eq("id", entitlement.id);
 
-if (creditError) {
-  await supabase
-    .from("flight_game_stats")
-    .delete()
-    .eq("game_id", game.id);
+      if (creditError) {
+        await supabase
+          .from("flight_game_stats")
+          .delete()
+          .eq("game_id", game.id);
 
-  await supabase
-    .from("flight_games")
-    .delete()
-    .eq("id", game.id);
+        await supabase
+          .from("flight_games")
+          .delete()
+          .eq("id", game.id);
 
-  throw creditError;
-}
+        throw creditError;
+      }
 
       /* -----------------------------------------------
          CLEAR CLOUD DRAFT
@@ -979,6 +1013,7 @@ if (creditError) {
 
       setLiveSegmentStartedAt(null);
       setIsInGame(false);
+      setIsClockPaused(false);
 
       setDate(todayISO());
 
@@ -1077,29 +1112,104 @@ if (creditError) {
           </button>
         </header>
 
-        {/* GAME STATUS */}
+        {/* PLAYING TIME — PROMINENT BETA v1.1 CONTROL */}
 
-        <div className="statusBar">
-          <button
-            type="button"
-            className={`gameStatus ${
-              isInGame ? "gameStatusOn" : ""
-            }`}
-            onClick={isInGame ? subOut : subIn}
-          >
-            <span className="gameDot" />
+        <section className={`playingPanel ${
+          isInGame && !isClockPaused
+            ? "running"
+            : isInGame && isClockPaused
+            ? "paused"
+            : "out"
+        }`}>
+          <div className="playingTop">
+            <div>
+              <span className="playingEyebrow">PLAYING TIME</span>
+              <strong className="playingHeadline">
+                {isInGame && !isClockPaused
+                  ? "● CLOCK RUNNING"
+                  : isInGame && isClockPaused
+                  ? "CLOCK PAUSED"
+                  : displayedPlayingSeconds === 0
+                  ? "START PLAYER'S MINUTES"
+                  : "PLAYER IS SUBBED OUT"}
+              </strong>
+            </div>
 
-            {isInGame ? "IN GAME" : "SUBBED OUT"}
-          </button>
-
-          <div className="gameClock">
-            <strong>
-              {formatClock(displayedPlayingSeconds)}
-            </strong>
-
-            <span>PLAYING TIME</span>
+            <div className="gameClock">
+              <strong>{formatClock(displayedPlayingSeconds)}</strong>
+              <span>TOTAL MINUTES</span>
+            </div>
           </div>
-        </div>
+
+          <div className="playingActions">
+            <button
+              type="button"
+              className={`playingAction in ${
+                isInGame && !isClockPaused ? "selected" : ""
+              } ${lastTapId === "in-game" || lastTapId === "resume-clock" ? "playingFlash" : ""}`}
+              onClick={isInGame && isClockPaused ? resumeClock : subIn}
+              disabled={isInGame && !isClockPaused}
+            >
+              <div className="playingIcon">●</div>
+              <div>
+                <strong>
+                  {isInGame && isClockPaused ? "RESUME CLOCK" : "IN GAME"}
+                </strong>
+                <span>
+                  {isInGame && isClockPaused
+                    ? "TAP WHEN PLAY RESUMES"
+                    : displayedPlayingSeconds === 0
+                    ? "TAP WHEN PLAYER ENTERS"
+                    : "TAP WHEN PLAYER RE-ENTERS"}
+                </span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`playingAction pause ${
+                isInGame && isClockPaused ? "selected" : ""
+              } ${lastTapId === "pause-clock" ? "playingFlash" : ""}`}
+              onClick={pauseClock}
+              disabled={!isInGame || isClockPaused}
+            >
+              <div className="playingIcon">Ⅱ</div>
+              <div>
+                <strong>PAUSE CLOCK</strong>
+                <span>TIMEOUTS · BREAKS · HALFTIME</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`playingAction out ${
+                !isInGame && displayedPlayingSeconds > 0 ? "selected" : ""
+              } ${lastTapId === "subbed-out" ? "playingFlash" : ""}`}
+              onClick={subOut}
+              disabled={!isInGame}
+            >
+              <div className="playingIcon">■</div>
+              <div>
+                <strong>SUBBED OUT</strong>
+                <span>TAP WHEN PLAYER EXITS</span>
+              </div>
+            </button>
+          </div>
+
+          {isInGame && !isClockPaused ? (
+            <div className="playingPrompt runningPrompt">
+              ● CLOCK RUNNING — PAUSE DURING TIMEOUTS, QUARTER BREAKS & HALFTIME
+            </div>
+          ) : !isInGame && displayedPlayingSeconds === 0 ? (
+            <div className="playingPrompt startPrompt">
+              ↑ TAP <b>IN GAME</b> WHEN YOUR PLAYER ENTERS TO START THE CLOCK
+            </div>
+          ) : isInGame && isClockPaused ? (
+            <div className="playingPrompt pausedPrompt">
+              CLOCK PAUSED — TAP <b>RESUME CLOCK</b> WHEN PLAY RESTARTS
+            </div>
+          ) : null}
+        </section>
 
         {/* GAME INFO */}
 
@@ -1313,51 +1423,7 @@ if (creditError) {
           ))}
         </section>
 
-        {/* PLAYING TIME */}
-
-        <div className="moduleTitle">
-          PLAYING TIME
-        </div>
-
-        <section className="subRow">
-          <button
-            type="button"
-            className={`subButton in ${
-              isInGame ? "selected" : ""
-            } ${
-              lastTapId === "in-game"
-                ? "subFlash"
-                : ""
-            }`}
-            onClick={subIn}
-          >
-            <div className="subIcon">●</div>
-
-            <div>
-              <strong>IN GAME</strong>
-              <span>TAP WHEN IN</span>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            className={`subButton out ${
-              !isInGame ? "selected" : ""
-            } ${
-              lastTapId === "subbed-out"
-                ? "subFlash"
-                : ""
-            }`}
-            onClick={subOut}
-          >
-            <div className="subIcon">◼</div>
-
-            <div>
-              <strong>SUBBED OUT</strong>
-              <span>TAP WHEN OUT</span>
-            </div>
-          </button>
-        </section>
+        {/* PLAYING TIME CONTROLS MOVED TO TOP */}
 
         {/* SAVE UTILITIES */}
 
@@ -1671,58 +1737,60 @@ if (creditError) {
           font-weight: 800;
         }
 
-        /* STATUS */
+        /* PLAYING TIME — PROMINENT */
 
-        .statusBar {
+        .playingPanel {
+          border: 1px solid #37373c;
+          border-radius: 13px;
+          background: linear-gradient(180deg, #111113, #050506);
+          padding: 10px;
+          margin: 4px 0 10px;
+          transition: border-color 120ms ease, box-shadow 120ms ease;
+        }
+
+        .playingPanel.running {
+          border-color: rgba(0, 221, 66, .72);
+          box-shadow: 0 0 20px rgba(0, 221, 66, .10);
+        }
+
+        .playingPanel.paused {
+          border-color: rgba(229, 167, 25, .66);
+          box-shadow: 0 0 18px rgba(229, 167, 25, .08);
+        }
+
+        .playingTop {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 12px;
-
-          min-height: 60px;
-          padding: 0 9px;
+          gap: 14px;
+          margin-bottom: 9px;
         }
 
-        .gameStatus {
-          border: 0;
-          background: transparent;
-
-          display: flex;
-          align-items: center;
-          gap: 11px;
-
-          color: #777;
-
-          font-size: 20px;
+        .playingEyebrow {
+          display: block;
+          color: #838389;
+          font-size: 8px;
           font-weight: 900;
-          letter-spacing: .05em;
-
-          cursor: pointer;
+          letter-spacing: .15em;
+          margin-bottom: 5px;
         }
 
-        .gameDot {
-          width: 16px;
-          height: 16px;
-          border-radius: 999px;
-          background: #56565c;
+        .playingHeadline {
+          display: block;
+          color: #fff;
+          font-size: 14px;
+          font-weight: 900;
+          letter-spacing: .035em;
         }
 
-        .gameStatusOn {
-          color: var(--green);
-        }
-
-        .gameStatusOn .gameDot {
-          background: var(--green);
-
-          box-shadow:
-            0 0 10px var(--greenGlow),
-            0 0 22px rgba(0, 255, 60, .24);
-        }
+        .playingPanel.running .playingHeadline { color: var(--green); }
+        .playingPanel.paused .playingHeadline { color: #e5a719; }
 
         .gameClock {
           display: flex;
           flex-direction: column;
           align-items: flex-end;
+          flex: 0 0 auto;
         }
 
         .gameClock strong {
@@ -1733,12 +1801,129 @@ if (creditError) {
 
         .gameClock span {
           margin-top: 5px;
-
-          font-size: 9px;
+          font-size: 8px;
           font-weight: 800;
           color: #a6a6aa;
           letter-spacing: .12em;
         }
+
+        .playingActions {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 7px;
+        }
+
+        .playingAction {
+          min-height: 63px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          color: #fff;
+          cursor: pointer;
+          transition: transform 100ms ease, filter 100ms ease, box-shadow 100ms ease, opacity 100ms ease;
+        }
+
+        .playingAction > div:last-child {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          min-width: 0;
+        }
+
+        .playingIcon {
+          font-size: 20px;
+          line-height: 1;
+          flex: 0 0 auto;
+        }
+
+        .playingAction strong {
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: .035em;
+          white-space: nowrap;
+        }
+
+        .playingAction span {
+          margin-top: 4px;
+          color: #bdbdc2;
+          font-size: 7px;
+          line-height: 1.2;
+          font-weight: 800;
+          letter-spacing: .025em;
+        }
+
+        .playingAction.in {
+          border: 1px solid #18883b;
+          background: #092913;
+        }
+
+        .playingAction.in.selected {
+          border-color: var(--green);
+          background: linear-gradient(125deg, #007f24, #00af35);
+          box-shadow: 0 0 17px rgba(0, 220, 60, .16);
+        }
+
+        .playingAction.pause {
+          border: 1px solid #765a1e;
+          background: #2a210d;
+        }
+
+        .playingAction.pause.selected {
+          border-color: #e5a719;
+          background: linear-gradient(125deg, #795507, #b17d10);
+        }
+
+        .playingAction.out {
+          border: 1px solid #505055;
+          background: #161617;
+        }
+
+        .playingAction.out.selected {
+          border-color: #777;
+          background: linear-gradient(135deg, #29292b, #151516);
+        }
+
+        .playingAction:disabled {
+          opacity: .45;
+          cursor: default;
+        }
+
+        .playingFlash {
+          transform: scale(.96);
+          filter: brightness(1.35);
+        }
+
+        .playingPrompt {
+          margin-top: 8px;
+          padding: 7px 8px;
+          border-radius: 7px;
+          text-align: center;
+          font-size: 8px;
+          line-height: 1.4;
+          font-weight: 850;
+          letter-spacing: .045em;
+        }
+
+        .runningPrompt {
+          background: rgba(0, 220, 66, .08);
+          color: #85e69f;
+        }
+
+        .startPrompt {
+          background: rgba(167, 77, 255, .09);
+          color: #bcbcc1;
+        }
+
+        .startPrompt b { color: #c887ff; }
+
+        .pausedPrompt {
+          background: rgba(229, 167, 25, .09);
+          color: #d2c39e;
+        }
+
+        .pausedPrompt b { color: #e5a719; }
 
         /* GAME META */
 
@@ -2169,106 +2354,6 @@ if (creditError) {
           letter-spacing: .09em;
         }
 
-        .subRow {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
-
-          margin-bottom: 8px;
-        }
-
-        .subButton {
-          min-height: 67px;
-
-          border-radius: 11px;
-
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-
-          color: white;
-
-          cursor: pointer;
-
-          transition:
-            transform 100ms ease,
-            filter 100ms ease,
-            box-shadow 100ms ease;
-        }
-
-        .subIcon {
-          font-size: 25px;
-          line-height: 1;
-        }
-
-        .subButton > div:last-child {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-        }
-
-        .subButton strong {
-          font-size: 13px;
-          font-weight: 900;
-          letter-spacing: .04em;
-        }
-
-        .subButton span {
-          margin-top: 3px;
-
-          font-size: 9px;
-          font-weight: 700;
-          color: #cacaca;
-          letter-spacing: .04em;
-        }
-
-        .subButton.in {
-          border: 1px solid #18883b;
-          background: #0a2713;
-          opacity: .72;
-        }
-
-        .subButton.in.selected {
-          border-color: var(--green);
-
-          background:
-            linear-gradient(
-              125deg,
-              #008426,
-              #00af35
-            );
-
-          opacity: 1;
-
-          box-shadow:
-            inset 0 0 18px rgba(255,255,255,.09),
-            0 0 18px rgba(0,220,60,.14);
-        }
-
-        .subButton.out {
-          border: 1px solid #505055;
-          background: #161617;
-          opacity: .72;
-        }
-
-        .subButton.out.selected {
-          border-color: #777;
-          background:
-            linear-gradient(
-              135deg,
-              #29292b,
-              #151516
-            );
-
-          opacity: 1;
-        }
-
-        .subFlash {
-          transform: scale(.96);
-          filter: brightness(1.35);
-        }
-
         /* UTILITIES */
 
         .utilityRow {
@@ -2584,17 +2669,12 @@ if (creditError) {
             font-size: 16px;
           }
 
-          .statusBar {
-            min-height: 54px;
+          .playingActions {
+            grid-template-columns: 1fr 1fr;
           }
 
-          .gameStatus {
-            font-size: 17px;
-          }
-
-          .gameDot {
-            width: 14px;
-            height: 14px;
+          .playingAction.out {
+            grid-column: 1 / -1;
           }
 
           .gameClock strong {
@@ -2659,8 +2739,8 @@ if (creditError) {
             font-size: 17px;
           }
 
-          .subButton strong {
-            font-size: 11px;
+          .playingAction strong {
+            font-size: 10px;
           }
         }
       `}</style>
