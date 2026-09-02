@@ -1,7 +1,6 @@
 "use client";
 
 import FlightLevelMark from "./FlightLevelMark";
-
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 
@@ -15,29 +14,41 @@ type RecapData = {
   firstName: string;
   lastName: string;
   jerseyNumber: string | null;
-
   opponentName: string;
   gameDate: string;
-
   flyScore: number | null;
   opponentScore: number | null;
   result: string | null;
-
   twoMade: number;
   twoMissed: number;
   threeMade: number;
   threeMissed: number;
   ftMade: number;
   ftMissed: number;
-
   rebounds: number;
   assists: number;
   steals: number;
   turnovers: number;
   blocks: number;
   fouls: number;
-
   playingSeconds: number;
+};
+
+type HistoricalGame = {
+  id: string;
+  gameDate: string;
+  opponentName: string;
+  points: number;
+  rebounds: number;
+  assists: number;
+  steals: number;
+};
+
+type FlightNoteData = {
+  type: "gold" | "purple" | "cyan";
+  icon: string;
+  title: string;
+  body: string;
 };
 
 function pad2(n: number) {
@@ -48,7 +59,6 @@ function formatClock(seconds: number) {
   const safe = Math.max(0, Math.floor(seconds || 0));
   const minutes = Math.floor(safe / 60);
   const secs = safe % 60;
-
   return `${minutes}:${pad2(secs)}`;
 }
 
@@ -57,19 +67,20 @@ function pct(made: number, attempts: number) {
   return Math.round((made / attempts) * 100);
 }
 
+function average(values: number[]) {
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
 export default function FlightPathPostgameRecap({
   gameId,
   playerId,
   onHome,
 }: Props) {
-  const [data, setData] =
-    useState<RecapData | null>(null);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [error, setError] =
-    useState("");
+  const [data, setData] = useState<RecapData | null>(null);
+  const [history, setHistory] = useState<HistoricalGame[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -79,154 +90,154 @@ export default function FlightPathPostgameRecap({
       setError("");
 
       try {
-        const { data: player, error: playerError } =
-          await supabase
-            .from("flight_players")
-            .select("first_name, last_name")
-            .eq("id", playerId)
-            .single();
+        const { data: player, error: playerError } = await supabase
+          .from("flight_players")
+          .select("first_name, last_name")
+          .eq("id", playerId)
+          .single();
 
         if (playerError) throw playerError;
 
-        const {
-          data: membership,
-          error: membershipError,
-        } = await supabase
+        const { data: membership, error: membershipError } = await supabase
           .from("flight_team_memberships")
           .select("jersey_number")
           .eq("player_id", playerId)
-          .order("created_at", {
-            ascending: false,
-          })
+          .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        if (membershipError) {
-          throw membershipError;
-        }
+        if (membershipError) throw membershipError;
 
-        const { data: game, error: gameError } =
-          await supabase
-            .from("flight_games")
-            .select(`
-              id,
-              game_date,
-              opponent_name,
-              fly_score,
-              opponent_score,
-              result
-            `)
-            .eq("id", gameId)
-            .single();
+        const { data: game, error: gameError } = await supabase
+          .from("flight_games")
+          .select(`
+            id,
+            game_date,
+            opponent_name,
+            fly_score,
+            opponent_score,
+            result
+          `)
+          .eq("id", gameId)
+          .single();
 
         if (gameError) throw gameError;
 
-        const { data: stats, error: statsError } =
-          await supabase
-            .from("flight_game_stats")
-            .select(`
-              two_pt_made,
-              two_pt_missed,
-              three_pt_made,
-              three_pt_missed,
-              ft_made,
-              ft_missed,
-              rebounds,
-              assists,
-              steals,
-              turnovers,
-              blocks,
-              fouls,
-              playing_seconds
-            `)
-            .eq("game_id", gameId)
-            .single();
+        const { data: stats, error: statsError } = await supabase
+          .from("flight_game_stats")
+          .select(`
+            two_pt_made,
+            two_pt_missed,
+            three_pt_made,
+            three_pt_missed,
+            ft_made,
+            ft_missed,
+            rebounds,
+            assists,
+            steals,
+            turnovers,
+            blocks,
+            fouls,
+            playing_seconds
+          `)
+          .eq("game_id", gameId)
+          .single();
 
         if (statsError) throw statsError;
 
+        const currentData: RecapData = {
+          firstName: player.first_name ?? "",
+          lastName: player.last_name ?? "",
+          jerseyNumber: membership?.jersey_number ?? null,
+          opponentName: game.opponent_name || "Opponent",
+          gameDate: game.game_date || "",
+          flyScore: game.fly_score ?? null,
+          opponentScore: game.opponent_score ?? null,
+          result: game.result ?? null,
+          twoMade: stats.two_pt_made ?? 0,
+          twoMissed: stats.two_pt_missed ?? 0,
+          threeMade: stats.three_pt_made ?? 0,
+          threeMissed: stats.three_pt_missed ?? 0,
+          ftMade: stats.ft_made ?? 0,
+          ftMissed: stats.ft_missed ?? 0,
+          rebounds: stats.rebounds ?? 0,
+          assists: stats.assists ?? 0,
+          steals: stats.steals ?? 0,
+          turnovers: stats.turnovers ?? 0,
+          blocks: stats.blocks ?? 0,
+          fouls: stats.fouls ?? 0,
+          playingSeconds: stats.playing_seconds ?? 0,
+        };
+
+        // Load the player's full completed-game history so Flight Notes
+        // are earned from real data instead of being hard-coded.
+        const { data: gameRows, error: historyGamesError } = await supabase
+          .from("flight_games")
+          .select("id, game_date, opponent_name, created_at")
+          .eq("player_id", playerId)
+          .order("game_date", { ascending: true })
+          .order("created_at", { ascending: true })
+          .limit(250);
+
+        if (historyGamesError) throw historyGamesError;
+
+        let historicalGames: HistoricalGame[] = [];
+
+        if (gameRows?.length) {
+          const ids = gameRows.map((row) => row.id);
+
+          const { data: statRows, error: historyStatsError } = await supabase
+            .from("flight_game_stats")
+            .select(`
+              game_id,
+              two_pt_made,
+              three_pt_made,
+              ft_made,
+              rebounds,
+              assists,
+              steals
+            `)
+            .in("game_id", ids);
+
+          if (historyStatsError) throw historyStatsError;
+
+          const statsByGame = new Map(
+            (statRows ?? []).map((row) => [row.game_id, row])
+          );
+
+          historicalGames = gameRows.map((row) => {
+            const stat = statsByGame.get(row.id) as any;
+            const points =
+              (stat?.two_pt_made ?? 0) * 2 +
+              (stat?.three_pt_made ?? 0) * 3 +
+              (stat?.ft_made ?? 0);
+
+            return {
+              id: row.id,
+              gameDate: row.game_date || "",
+              opponentName: row.opponent_name || "Opponent",
+              points,
+              rebounds: stat?.rebounds ?? 0,
+              assists: stat?.assists ?? 0,
+              steals: stat?.steals ?? 0,
+            };
+          });
+        }
+
         if (cancelled) return;
 
-        setData({
-          firstName:
-            player.first_name ?? "",
-
-          lastName:
-            player.last_name ?? "",
-
-          jerseyNumber:
-            membership?.jersey_number ?? null,
-
-          opponentName:
-            game.opponent_name || "Opponent",
-
-          gameDate:
-            game.game_date || "",
-
-          flyScore:
-            game.fly_score ?? null,
-
-          opponentScore:
-            game.opponent_score ?? null,
-
-          result:
-            game.result ?? null,
-
-          twoMade:
-            stats.two_pt_made ?? 0,
-
-          twoMissed:
-            stats.two_pt_missed ?? 0,
-
-          threeMade:
-            stats.three_pt_made ?? 0,
-
-          threeMissed:
-            stats.three_pt_missed ?? 0,
-
-          ftMade:
-            stats.ft_made ?? 0,
-
-          ftMissed:
-            stats.ft_missed ?? 0,
-
-          rebounds:
-            stats.rebounds ?? 0,
-
-          assists:
-            stats.assists ?? 0,
-
-          steals:
-            stats.steals ?? 0,
-
-          turnovers:
-            stats.turnovers ?? 0,
-
-          blocks:
-            stats.blocks ?? 0,
-
-          fouls:
-            stats.fouls ?? 0,
-
-          playingSeconds:
-            stats.playing_seconds ?? 0,
-        });
+        setData(currentData);
+        setHistory(historicalGames);
       } catch (err) {
-        console.error(
-          "Unable to load postgame recap:",
-          err
-        );
+        console.error("Unable to load postgame recap:", err);
 
         if (!cancelled) {
           setError(
-            err instanceof Error
-              ? err.message
-              : "Unable to load game recap."
+            err instanceof Error ? err.message : "Unable to load game recap."
           );
         }
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     }
 
@@ -240,24 +251,15 @@ export default function FlightPathPostgameRecap({
   const derived = useMemo(() => {
     if (!data) return null;
 
-    const fgm =
-      data.twoMade +
-      data.threeMade;
-
+    const fgm = data.twoMade + data.threeMade;
     const fga =
       data.twoMade +
       data.twoMissed +
       data.threeMade +
       data.threeMissed;
 
-    const threeAttempts =
-      data.threeMade +
-      data.threeMissed;
-
-    const ftAttempts =
-      data.ftMade +
-      data.ftMissed;
-
+    const threeAttempts = data.threeMade + data.threeMissed;
+    const ftAttempts = data.ftMade + data.ftMissed;
     const points =
       data.twoMade * 2 +
       data.threeMade * 3 +
@@ -268,94 +270,160 @@ export default function FlightPathPostgameRecap({
       fgm,
       fga,
       fgPct: pct(fgm, fga),
-
-      twoAttempts:
-        data.twoMade +
-        data.twoMissed,
-
-      twoPct: pct(
-        data.twoMade,
-        data.twoMade +
-          data.twoMissed
-      ),
-
+      twoAttempts: data.twoMade + data.twoMissed,
+      twoPct: pct(data.twoMade, data.twoMade + data.twoMissed),
       threeAttempts,
-      threePct: pct(
-        data.threeMade,
-        threeAttempts
-      ),
-
+      threePct: pct(data.threeMade, threeAttempts),
       ftAttempts,
-      ftPct: pct(
-        data.ftMade,
-        ftAttempts
-      ),
+      ftPct: pct(data.ftMade, ftAttempts),
     };
   }, [data]);
 
+  const flightNote = useMemo<FlightNoteData | null>(() => {
+    if (!data || !derived || !history.length) return null;
+
+    const currentIndex = history.findIndex((game) => game.id === gameId);
+    if (currentIndex < 0) return null;
+
+    const current = history[currentIndex];
+    const prior = history.slice(0, currentIndex);
+    const gameNumber = currentIndex + 1;
+
+    // Priority 1 — Actual season/career high.
+    // In the current MVP, the available history is the player's tracked history,
+    // so this is the strongest honest "high" signal we can calculate.
+    if (prior.length > 0) {
+      const candidates = [
+        {
+          label: "POINTS",
+          value: current.points,
+          priorHigh: Math.max(...prior.map((game) => game.points)),
+        },
+        {
+          label: "REBOUNDS",
+          value: current.rebounds,
+          priorHigh: Math.max(...prior.map((game) => game.rebounds)),
+        },
+        {
+          label: "ASSISTS",
+          value: current.assists,
+          priorHigh: Math.max(...prior.map((game) => game.assists)),
+        },
+        {
+          label: "STEALS",
+          value: current.steals,
+          priorHigh: Math.max(...prior.map((game) => game.steals)),
+        },
+      ]
+        .filter((item) => item.value > item.priorHigh && item.value > 0)
+        .sort((a, b) => {
+          const aGain = a.value - a.priorHigh;
+          const bGain = b.value - b.priorHigh;
+          return bGain - aGain;
+        });
+
+      if (candidates.length) {
+        const best = candidates[0];
+
+        return {
+          type: "gold",
+          icon: "↗",
+          title: "SEASON HIGH",
+          body: `${best.value} ${best.label.toLowerCase()} vs. ${current.opponentName}.`,
+        };
+      }
+    }
+
+    // Priority 2 — Meaningful recent scoring trend.
+    // Compare the current 3-game window against the prior 3-game window.
+    if (currentIndex >= 5) {
+      const recentThree = history.slice(currentIndex - 2, currentIndex + 1);
+      const previousThree = history.slice(currentIndex - 5, currentIndex - 2);
+
+      const recentAvg = average(recentThree.map((game) => game.points));
+      const previousAvg = average(previousThree.map((game) => game.points));
+      const delta = recentAvg - previousAvg;
+
+      if (delta >= 2) {
+        return {
+          type: "purple",
+          icon: "⌁",
+          title: "TRENDING UP",
+          body: `Scoring is up ${delta.toFixed(1)} PPG over the last 3 games.`,
+        };
+      }
+    }
+
+    // Priority 3 — Real tracked-game milestone.
+    if (gameNumber === 1 || gameNumber % 5 === 0) {
+      return {
+        type: "cyan",
+        icon: "☆",
+        title: "MILESTONE",
+        body:
+          gameNumber === 1
+            ? "First tracked game added to the journey."
+            : `${gameNumber} tracked games on the Flight Path.`,
+      };
+    }
+
+    // Sometimes no Flight Note is the right answer.
+    return null;
+  }, [data, derived, history, gameId]);
+
   async function shareGame() {
-  if (!data || !derived) return;
+    if (!data || !derived) return;
 
-  const playerName =
-    `${data.firstName} ${data.lastName}`.trim();
+    const playerName = `${data.firstName} ${data.lastName}`.trim();
+    const score =
+      data.flyScore !== null && data.opponentScore !== null
+        ? `${data.result ?? ""} ${data.flyScore}-${data.opponentScore}`
+        : "";
 
-  const score =
-    data.flyScore !== null &&
-    data.opponentScore !== null
-      ? `${data.result ?? ""} ${data.flyScore}-${data.opponentScore}`
-      : "";
+    // Playing time intentionally stays private by default.
+    const text =
+      `FLIGHT PATH\n\n` +
+      `${playerName}` +
+      `${data.jerseyNumber ? ` #${data.jerseyNumber}` : ""}\n` +
+      `vs. ${data.opponentName}\n` +
+      `${score}\n\n` +
+      `${derived.points} PTS · ` +
+      `${data.rebounds} REB · ` +
+      `${data.assists} AST · ` +
+      `${data.steals} STL\n\n` +
+      `2PT ${data.twoMade}-${derived.twoAttempts} · ` +
+      `3PT ${data.threeMade}-${derived.threeAttempts} · ` +
+      `FT ${data.ftMade}-${derived.ftAttempts}`;
 
-  const text =
-    `FLIGHT PATH\n\n` +
-    `${playerName}` +
-    `${data.jerseyNumber ? ` #${data.jerseyNumber}` : ""}\n` +
-    `vs. ${data.opponentName}\n` +
-    `${score}\n\n` +
-    `${derived.points} PTS · ` +
-    `${data.rebounds} REB · ` +
-    `${data.assists} AST · ` +
-    `${data.steals} STL\n\n` +
-    `2PT ${data.twoMade}-${derived.twoAttempts} · ` +
-    `3PT ${data.threeMade}-${derived.threeAttempts} · ` +
-    `FT ${data.ftMade}-${derived.ftAttempts}\n` +
-    `Playing Time ${formatClock(data.playingSeconds)}`;
+    try {
+      if (
+        typeof navigator !== "undefined" &&
+        typeof navigator.share === "function"
+      ) {
+        await navigator.share({
+          title: `${playerName} · Flight Path`,
+          text,
+        });
+        return;
+      }
 
-  try {
-    if (
-      typeof navigator !== "undefined" &&
-      typeof navigator.share === "function"
-    ) {
-      await navigator.share({
-        title: `${playerName} · Flight Path`,
-        text,
-      });
+      if (
+        typeof navigator !== "undefined" &&
+        typeof navigator.clipboard?.writeText === "function"
+      ) {
+        await navigator.clipboard.writeText(text);
 
-      return;
+        alert(
+          "Game summary copied. You can paste it into a text or email."
+        );
+        return;
+      }
+
+      alert("Sharing is not available in this browser yet.");
+    } catch (error) {
+      console.error("Share cancelled or unavailable:", error);
     }
-
-    if (
-      typeof navigator !== "undefined" &&
-      typeof navigator.clipboard?.writeText === "function"
-    ) {
-      await navigator.clipboard.writeText(text);
-
-      alert(
-        "Game summary copied. You can paste it into a text or email."
-      );
-
-      return;
-    }
-
-    alert(
-      "Sharing is not available in this browser yet."
-    );
-  } catch (error) {
-    console.error(
-      "Share cancelled or unavailable:",
-      error
-    );
   }
-}
 
   if (loading) {
     return (
@@ -369,32 +437,20 @@ export default function FlightPathPostgameRecap({
   if (error || !data || !derived) {
     return (
       <main className="statePage">
-        <strong>
-          WE COULDN&apos;T LOAD THIS GAME.
-        </strong>
-
-        <button onClick={onHome}>
-          RETURN HOME
-        </button>
-
+        <strong>WE COULDN&apos;T LOAD THIS GAME.</strong>
+        <button onClick={onHome}>RETURN HOME</button>
         <style>{stateCss}</style>
       </main>
     );
   }
 
-  const playerName =
-    `${data.firstName} ${data.lastName}`.trim();
-
+  const playerName = `${data.firstName} ${data.lastName}`.trim();
   const scoreReady =
-    data.flyScore !== null &&
-    data.opponentScore !== null;
+    data.flyScore !== null && data.opponentScore !== null;
 
   return (
     <main className="page">
       <section className="app">
-
-        {/* FLIGHT PATH BRAND */}
-
         <header className="brandHeader">
           <button
             type="button"
@@ -417,45 +473,41 @@ export default function FlightPathPostgameRecap({
           </button>
         </header>
 
-        {/* LEVEL SYSTEM */}
+        <section className="levels">
+          <FlightLevelMark
+            level="elevate"
+            showName
+            showDescriptor
+            size="md"
+          />
 
-<section className="levels">
-  <FlightLevelMark
-    level="elevate"
-    showName
-    showDescriptor
-    size="md"
-  />
+          <div className="levelArrow">→</div>
 
-  <div className="levelArrow">→</div>
+          <FlightLevelMark
+            level="ascend"
+            showName
+            showDescriptor
+            size="md"
+          />
 
-  <FlightLevelMark
-    level="ascend"
-    showName
-    showDescriptor
-    size="md"
-  />
+          <div className="levelArrow">→</div>
 
-  <div className="levelArrow">→</div>
+          <FlightLevelMark
+            level="air"
+            showName
+            showDescriptor
+            size="md"
+          />
 
-  <FlightLevelMark
-    level="air"
-    showName
-    showDescriptor
-    size="md"
-  />
+          <div className="levelArrow">→</div>
 
-  <div className="levelArrow">→</div>
-
-  <FlightLevelMark
-    level="select"
-    showName
-    showDescriptor
-    size="md"
-  />
-</section>
-
-        {/* GAME COMPLETE */}
+          <FlightLevelMark
+            level="select"
+            showName
+            showDescriptor
+            size="md"
+          />
+        </section>
 
         <section className="completeHero">
           <div className="confetti">
@@ -468,29 +520,19 @@ export default function FlightPathPostgameRecap({
           </div>
         </section>
 
-        {/* PLAYER / RESULT */}
-
         <section className="playerCard">
           <div className="avatar">
             <div className="avatarInner">
-              {data.firstName
-                .charAt(0)
-                .toUpperCase()}
-
-              {data.lastName
-                .charAt(0)
-                .toUpperCase()}
+              {data.firstName.charAt(0).toUpperCase()}
+              {data.lastName.charAt(0).toUpperCase()}
             </div>
           </div>
 
           <div className="playerResult">
             <div className="playerName">
               {playerName}
-
               {data.jerseyNumber && (
-                <span>
-                  #{data.jerseyNumber}
-                </span>
+                <span>#{data.jerseyNumber}</span>
               )}
             </div>
 
@@ -509,9 +551,7 @@ export default function FlightPathPostgameRecap({
                 </strong>
 
                 <b>{data.flyScore}</b>
-
                 <em>–</em>
-
                 <b>{data.opponentScore}</b>
               </div>
             )}
@@ -522,51 +562,21 @@ export default function FlightPathPostgameRecap({
           </div>
         </section>
 
-        {/* HERO STATS */}
-
         <section className="heroStats">
-          <HeroStat
-            value={derived.points}
-            label="PTS"
-          />
-
-          <HeroStat
-            value={data.rebounds}
-            label="REB"
-          />
-
-          <HeroStat
-            value={data.assists}
-            label="AST"
-          />
-
-          <HeroStat
-            value={data.steals}
-            label="STL"
-          />
+          <HeroStat value={derived.points} label="PTS" />
+          <HeroStat value={data.rebounds} label="REB" />
+          <HeroStat value={data.assists} label="AST" />
+          <HeroStat value={data.steals} label="STL" />
         </section>
-
-        {/* PLAYING TIME */}
 
         <section className="timeCard">
           <div>
-            <span className="clockIcon">
-              ◷
-            </span>
-
-            <strong>
-              PLAYING TIME
-            </strong>
+            <span className="clockIcon">◷</span>
+            <strong>PLAYING TIME</strong>
           </div>
 
-          <b>
-            {formatClock(
-              data.playingSeconds
-            )}
-          </b>
+          <b>{formatClock(data.playingSeconds)}</b>
         </section>
-
-        {/* SHOOTING */}
 
         <section className="module">
           <div className="moduleTitle">
@@ -578,82 +588,58 @@ export default function FlightPathPostgameRecap({
               type="two"
               label="2PT"
               made={data.twoMade}
-              attempts={
-                derived.twoAttempts
-              }
-              percentage={
-                derived.twoPct
-              }
+              attempts={derived.twoAttempts}
+              percentage={derived.twoPct}
             />
 
             <ShootStat
               type="three"
               label="3PT"
               made={data.threeMade}
-              attempts={
-                derived.threeAttempts
-              }
-              percentage={
-                derived.threePct
-              }
+              attempts={derived.threeAttempts}
+              percentage={derived.threePct}
             />
 
             <ShootStat
               type="ft"
               label="FT"
               made={data.ftMade}
-              attempts={
-                derived.ftAttempts
-              }
-              percentage={
-                derived.ftPct
-              }
+              attempts={derived.ftAttempts}
+              percentage={derived.ftPct}
             />
 
             <div className="shootStat">
               <span className="fgLabel">
                 FG%
               </span>
-
-              <strong>
-                {derived.fgPct}%
-              </strong>
+              <strong>{derived.fgPct}%</strong>
             </div>
           </div>
         </section>
-
-        {/* FLIGHT NOTES */}
 
         <section className="module">
           <div className="moduleTitle">
             FLIGHT NOTES
           </div>
 
-          <div className="notesGrid">
-            <FlightNote
-              type="gold"
-              icon="↗"
-              title="SEASON HIGH"
-              body="Keep building the standard."
-            />
-
-            <FlightNote
-              type="purple"
-              icon="⌁"
-              title="TRENDING UP"
-              body="Your Flight Path is taking shape."
-            />
-
-            <FlightNote
-              type="cyan"
-              icon="☆"
-              title="MILESTONE"
-              body="Another game added to the journey."
-            />
-          </div>
+          {flightNote ? (
+            <div className="notesGrid single">
+              <FlightNote
+                type={flightNote.type}
+                icon={flightNote.icon}
+                title={flightNote.title}
+                body={flightNote.body}
+              />
+            </div>
+          ) : (
+            <div className="noFlightNote">
+              <strong>KEEP BUILDING.</strong>
+              <span>
+                Flight Notes appear when a meaningful high, trend, or milestone is earned.
+              </span>
+            </div>
+          )}
         </section>
-
-        {/* ACTIONS */}
 
         <button
           type="button"
@@ -684,7 +670,6 @@ export default function FlightPathPostgameRecap({
         >
           ✎ EDIT GAME
         </button>
-
       </section>
 
       <style>{`
@@ -694,7 +679,6 @@ export default function FlightPathPostgameRecap({
           --cyan: #00bdd7;
           --green: #10d643;
           --red: #ff2424;
-
           --white: #ffffff;
           --muted: #99999f;
           --panel: #09090a;
@@ -730,20 +714,11 @@ export default function FlightPathPostgameRecap({
               transparent 25%
             ),
             #000;
-
           color: white;
-
           padding:
-            max(
-              14px,
-              env(safe-area-inset-top)
-            )
+            max(14px, env(safe-area-inset-top))
             14px
-            calc(
-              32px +
-              env(safe-area-inset-bottom)
-            );
-
+            calc(32px + env(safe-area-inset-bottom));
           font-family:
             "Arial Narrow",
             "Helvetica Neue Condensed",
@@ -759,11 +734,8 @@ export default function FlightPathPostgameRecap({
 
         .brandHeader {
           min-height: 58px;
-
           display: grid;
-          grid-template-columns:
-            46px 1fr 46px;
-
+          grid-template-columns: 46px 1fr 46px;
           align-items: center;
         }
 
@@ -790,9 +762,7 @@ export default function FlightPathPostgameRecap({
           display: flex;
           align-items: center;
           justify-content: center;
-
           gap: 7px;
-
           font-size: 25px;
           font-weight: 950;
           font-style: italic;
@@ -803,11 +773,8 @@ export default function FlightPathPostgameRecap({
           color: var(--gold);
           display: inline-block;
           transform: rotate(-25deg);
-
           font-size: 21px;
         }
-
-        /* LEVELS */
 
         .levels {
           display: grid;
@@ -816,62 +783,9 @@ export default function FlightPathPostgameRecap({
             1fr 18px
             1fr 18px
             1fr;
-
           align-items: center;
-
           padding: 13px 0 17px;
-
-          border-bottom:
-            1px solid #222226;
-        }
-
-        .level {
-          min-width: 0;
-          text-align: center;
-        }
-
-        .level svg {
-          width: 36px;
-          height: 36px;
-          margin-bottom: 4px;
-        }
-
-        .levelName {
-          font-size: 12px;
-          line-height: 1;
-
-          font-weight: 950;
-          white-space: nowrap;
-        }
-
-        .levelSub {
-          margin-top: 6px;
-
-          font-size: 7px;
-          line-height: 1.15;
-
-          color: white;
-
-          font-weight: 800;
-          letter-spacing: .07em;
-
-          white-space: nowrap;
-        }
-
-        .level.elevate {
-          color: var(--gold);
-        }
-
-        .level.ascend {
-          color: var(--purple);
-        }
-
-        .level.air {
-          color: var(--cyan);
-        }
-
-        .level.select {
-          color: white;
+          border-bottom: 1px solid #222226;
         }
 
         .levelArrow {
@@ -880,11 +794,8 @@ export default function FlightPathPostgameRecap({
           text-align: center;
         }
 
-        /* COMPLETE */
-
         .completeHero {
           padding: 32px 0 18px;
-
           position: relative;
           text-align: center;
         }
@@ -894,32 +805,19 @@ export default function FlightPathPostgameRecap({
           top: 10px;
           left: 0;
           right: 0;
-
           color: var(--purple);
-
           font-size: 22px;
           letter-spacing: .4em;
-
           opacity: .55;
         }
 
         .completeTitle {
           position: relative;
-
-          font-size: clamp(
-            34px,
-            10vw,
-            48px
-          );
-
+          font-size: clamp(34px, 10vw, 48px);
           line-height: .95;
-
           font-weight: 1000;
           letter-spacing: -.035em;
-
-          text-shadow:
-            0 2px 13px
-            rgba(255,255,255,.08);
+          text-shadow: 0 2px 13px rgba(255,255,255,.08);
         }
 
         .completeTitle span {
@@ -927,39 +825,23 @@ export default function FlightPathPostgameRecap({
           font-size: .72em;
         }
 
-        /* PLAYER */
-
         .playerCard {
           display: grid;
-          grid-template-columns:
-            120px 1fr;
-
+          grid-template-columns: 120px 1fr;
           gap: 18px;
           align-items: center;
-
           border: 1px solid #414147;
           border-radius: 20px;
-
-          background:
-            linear-gradient(
-              145deg,
-              #101012,
-              #050506
-            );
-
+          background: linear-gradient(145deg, #101012, #050506);
           padding: 17px;
-
           margin-bottom: 12px;
         }
 
         .avatar {
           width: 116px;
           height: 116px;
-
           border-radius: 50%;
-
           padding: 3px;
-
           background:
             linear-gradient(
               145deg,
@@ -972,46 +854,32 @@ export default function FlightPathPostgameRecap({
         .avatarInner {
           width: 100%;
           height: 100%;
-
           display: flex;
           align-items: center;
           justify-content: center;
-
           border-radius: 50%;
-
           background:
             radial-gradient(
               circle at 50% 30%,
               #313137,
               #0b0b0d 67%
             );
-
           color: white;
-
           font-size: 32px;
           font-weight: 950;
         }
 
         .playerName {
           color: white;
-
-          font-size: clamp(
-            21px,
-            6vw,
-            29px
-          );
-
+          font-size: clamp(21px, 6vw, 29px);
           line-height: 1;
-
           font-weight: 950;
           text-transform: uppercase;
-
           white-space: nowrap;
         }
 
         .playerName span {
           margin-left: 7px;
-
           color: var(--purple);
           font-size: .75em;
         }
@@ -1019,9 +887,7 @@ export default function FlightPathPostgameRecap({
         .score {
           display: flex;
           align-items: center;
-
           gap: 10px;
-
           margin-top: 13px;
         }
 
@@ -1045,59 +911,43 @@ export default function FlightPathPostgameRecap({
 
         .score b {
           color: white;
-
           font-size: 42px;
           line-height: 1;
-
           font-weight: 950;
         }
 
         .score em {
           color: #74747a;
-
           font-size: 27px;
           font-style: normal;
         }
 
         .opponent {
           margin-top: 8px;
-
           color: #aaaaaf;
-
           font-size: 14px;
           font-weight: 900;
-
           text-transform: uppercase;
           letter-spacing: .05em;
         }
 
-        /* HERO STATS */
-
         .heroStats {
           display: grid;
-          grid-template-columns:
-            repeat(4, 1fr);
-
+          grid-template-columns: repeat(4, 1fr);
           border: 1px solid #3b3b40;
           border-radius: 14px;
-
           overflow: hidden;
-
           background: #09090a;
-
           margin-bottom: 12px;
         }
 
         .heroStat {
           min-height: 94px;
-
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-
-          border-right:
-            1px solid #37373c;
+          border-right: 1px solid #37373c;
         }
 
         .heroStat:last-child {
@@ -1112,30 +962,21 @@ export default function FlightPathPostgameRecap({
 
         .heroStat span {
           margin-top: 10px;
-
           color: var(--cyan);
-
           font-size: 12px;
           font-weight: 950;
           letter-spacing: .1em;
         }
 
-        /* TIME */
-
         .timeCard {
           min-height: 74px;
-
           display: flex;
           align-items: center;
           justify-content: space-between;
-
           padding: 0 18px;
-
           border: 1px solid #3a3a40;
           border-radius: 13px;
-
           background: #09090a;
-
           margin-bottom: 12px;
         }
 
@@ -1160,57 +1001,42 @@ export default function FlightPathPostgameRecap({
           font-weight: 900;
         }
 
-        /* MODULE */
-
         .module {
           border: 1px solid #37373c;
           border-radius: 13px;
-
           padding: 12px;
-
           background:
             linear-gradient(
               180deg,
               #080809,
               #030303
             );
-
           margin-bottom: 12px;
         }
 
         .moduleTitle {
           color: white;
-
           font-size: 15px;
           font-weight: 950;
           letter-spacing: .07em;
-
           margin: 0 0 10px;
         }
 
-        /* SHOOTING */
-
         .shootGrid {
           display: grid;
-          grid-template-columns:
-            repeat(4, 1fr);
-
+          grid-template-columns: repeat(4, 1fr);
           border: 1px solid #323237;
           border-radius: 10px;
-
           overflow: hidden;
         }
 
         .shootStat {
           min-height: 112px;
-
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-
-          border-right:
-            1px solid #3a3a3f;
+          border-right: 1px solid #3a3a3f;
         }
 
         .shootStat:last-child {
@@ -1224,18 +1050,14 @@ export default function FlightPathPostgameRecap({
 
         .shootStat strong {
           margin-top: 10px;
-
           color: white;
-
           font-size: 28px;
           line-height: 1;
-
           font-weight: 950;
         }
 
         .shootStat small {
           margin-top: 8px;
-
           font-size: 16px;
           font-weight: 900;
         }
@@ -1259,42 +1081,37 @@ export default function FlightPathPostgameRecap({
           color: #d7d7da;
         }
 
-        /* NOTES */
-
         .notesGrid {
           display: grid;
-          grid-template-columns:
-            repeat(3, 1fr);
-
+          grid-template-columns: repeat(3, 1fr);
           gap: 7px;
+        }
+
+        .notesGrid.single {
+          grid-template-columns: 1fr;
         }
 
         .flightNote {
           min-height: 142px;
-
           border: 1px solid #34343a;
           border-radius: 10px;
-
           background:
             linear-gradient(
               155deg,
               #121214,
               #070708
             );
-
-          padding: 12px 7px;
-
+          padding: 12px 14px;
           display: flex;
           flex-direction: column;
           align-items: center;
-
+          justify-content: center;
           text-align: center;
         }
 
         .noteIcon {
           font-size: 33px;
           line-height: 1;
-
           margin-bottom: 9px;
         }
 
@@ -1306,10 +1123,8 @@ export default function FlightPathPostgameRecap({
 
         .flightNote p {
           margin: 8px 0 0;
-
           color: #d0d0d3;
-
-          font-size: 10px;
+          font-size: 11px;
           line-height: 1.35;
         }
 
@@ -1328,42 +1143,54 @@ export default function FlightPathPostgameRecap({
           color: var(--cyan);
         }
 
-        /* ACTIONS */
+        .noFlightNote {
+          min-height: 96px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          border: 1px solid #2c2c31;
+          border-radius: 10px;
+          padding: 15px;
+          background: #070708;
+        }
+
+        .noFlightNote strong {
+          font-size: 13px;
+          letter-spacing: .06em;
+        }
+
+        .noFlightNote span {
+          margin-top: 7px;
+          color: #8e8e94;
+          font-size: 10px;
+          line-height: 1.45;
+        }
 
         .shareButton,
         .pathButton,
         .editButton {
           width: 100%;
           min-height: 58px;
-
           border-radius: 9px;
-
           display: flex;
           align-items: center;
           justify-content: center;
-
           gap: 12px;
-
           cursor: pointer;
-
           font-weight: 950;
           letter-spacing: .075em;
         }
 
         .shareButton {
           border: 1px solid #29d9ec;
-
           background:
             linear-gradient(
               110deg,
               #00a5c2,
               #13c8e2
             );
-
           color: white;
-
           font-size: 16px;
-
           margin-top: 15px;
         }
 
@@ -1373,14 +1200,9 @@ export default function FlightPathPostgameRecap({
 
         .pathButton {
           margin-top: 8px;
-
-          border:
-            1.5px solid
-            var(--purple);
-
+          border: 1.5px solid var(--purple);
           background: #030303;
           color: var(--purple);
-
           font-size: 15px;
         }
 
@@ -1390,15 +1212,10 @@ export default function FlightPathPostgameRecap({
 
         .editButton {
           min-height: 49px;
-
           margin-top: 8px;
-
           border: 1px solid #45454a;
-
           background: #020202;
-
           color: #c1c1c5;
-
           font-size: 12px;
         }
 
@@ -1420,25 +1237,9 @@ export default function FlightPathPostgameRecap({
               1fr;
           }
 
-          .level svg {
-            width: 30px;
-            height: 30px;
-          }
-
-          .levelName {
-            font-size: 10px;
-          }
-
-          .levelSub {
-            font-size: 6px;
-          }
-
           .playerCard {
-            grid-template-columns:
-              93px 1fr;
-
+            grid-template-columns: 93px 1fr;
             gap: 12px;
-
             padding: 13px;
           }
 
@@ -1475,12 +1276,8 @@ export default function FlightPathPostgameRecap({
             font-size: 23px;
           }
 
-          .notesGrid {
-            gap: 5px;
-          }
-
           .flightNote {
-            min-height: 130px;
+            min-height: 118px;
           }
         }
       `}</style>
@@ -1519,38 +1316,10 @@ function ShootStat({
   return (
     <div className={`shootStat ${type}`}>
       <span>{label}</span>
-
       <strong>
         {made}-{attempts}
       </strong>
-
       <small>{percentage}%</small>
-    </div>
-  );
-}
-
-function Level({
-  type,
-  icon,
-  name,
-  sub,
-}: {
-  type: string;
-  icon: React.ReactNode;
-  name: string;
-  sub: string;
-}) {
-  return (
-    <div className={`level ${type}`}>
-      {icon}
-
-      <div className="levelName">
-        {name}
-      </div>
-
-      <div className="levelSub">
-        {sub}
-      </div>
     </div>
   );
 }
@@ -1568,12 +1337,8 @@ function FlightNote({
 }) {
   return (
     <div className={`flightNote ${type}`}>
-      <div className="noteIcon">
-        {icon}
-      </div>
-
+      <div className="noteIcon">{icon}</div>
       <strong>{title}</strong>
-
       <p>{body}</p>
     </div>
   );
@@ -1584,23 +1349,14 @@ const stateCss = `
     min-height: 100vh;
     background: #000;
     color: white;
-
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-
     gap: 20px;
-
     padding: 24px;
-
     text-align: center;
-
-    font-family:
-      Arial,
-      Helvetica,
-      sans-serif;
-
+    font-family: Arial, Helvetica, sans-serif;
     font-size: 11px;
     font-weight: 900;
     letter-spacing: .14em;
@@ -1608,15 +1364,11 @@ const stateCss = `
 
   .statePage button {
     min-height: 48px;
-
     padding: 0 22px;
-
     border: 1px solid #8332d4;
     border-radius: 8px;
-
     background: #4a1679;
     color: white;
-
     font-weight: 900;
   }
 `;
