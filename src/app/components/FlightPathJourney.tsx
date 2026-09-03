@@ -640,7 +640,13 @@ export default function FlightPathJourney({
 
             <section className="timelineCard card">
               <div className="sectionTitle">YOUR FLIGHT PATH</div>
-              <p>Every season is part of the journey.</p>
+              <p>
+                Your Flight Path reflects where you competed each season.
+                <br />
+                <strong>
+                  Levels may move up, down, or stay the same as your journey develops.
+                </strong>
+              </p>
 
               {memberships.length ? (
                 <div className="timelineScroll">
@@ -701,7 +707,11 @@ export default function FlightPathJourney({
             <section className="timelineCard card">
               <div className="sectionTitle">CAREER JOURNEY</div>
               <p>
-                The path can move forward, back, or sideways from season to season.
+                Your Flight Path reflects where you competed each season.
+                <br />
+                <strong>
+                  Levels may move up, down, or stay the same as your journey develops.
+                </strong>
               </p>
 
               <div className="timelineScroll">
@@ -815,7 +825,7 @@ const styles = `
   .tabs{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #35353a;border-radius:11px;overflow:hidden;background:#050506;margin-bottom:14px}.tabs button{min-height:48px;border:0;border-right:1px solid #29292e;background:transparent;color:#99999f;font-size:11px;font-weight:950;letter-spacing:.08em;cursor:pointer}.tabs button:last-child{border-right:0}.tabs button.active{color:#e5a719;background:linear-gradient(180deg,rgba(229,167,25,.13),rgba(229,167,25,.03));box-shadow:inset 0 -2px 0 #e5a719}
 
   .card{border:1px solid #303035;border-radius:14px;background:linear-gradient(180deg,#0d0d0f,#070708);padding:15px;margin-bottom:13px}
-  .sectionTitle{font-size:11px;font-weight:950;letter-spacing:.09em}.card p{color:#8e8e94;font-size:11px;line-height:1.5;margin:8px 0 15px}
+  .sectionTitle{font-size:11px;font-weight:950;letter-spacing:.09em}.card p{color:#8e8e94;font-size:11px;line-height:1.55;margin:8px 0 15px}.card p strong{color:#c9c9ce;font-weight:900}
 
   .seasonIdentity{display:flex;align-items:center;justify-content:space-between;gap:12px}.seasonIdentityLeft{display:flex;align-items:center;gap:12px;min-width:0}.seasonIdentityLeft>div:last-child{display:flex;flex-direction:column;gap:5px;min-width:0}.seasonIdentityLeft strong{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.seasonIdentityLeft span{color:#95959b;font-size:10px}
   .recordBlock{display:grid;grid-template-columns:1fr 1fr;gap:0;border-left:1px solid #29292e}.recordBlock>div{min-width:68px;text-align:center;padding:4px 9px}.recordBlock>div+div{border-left:1px solid #29292e}.recordBlock strong{display:block;font-size:23px}.recordBlock strong i{color:#33d863;font-style:normal}.recordBlock span{display:block;margin-top:4px;color:#96969c;font-size:8px;font-weight:900;letter-spacing:.07em}
